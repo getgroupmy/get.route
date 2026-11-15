@@ -1,0 +1,33 @@
+# GET.route on the office NAS (see README.md): the Waze route server GET.ride's
+# Fare AI calls as "Waze server N". Reached only through a Cloudflare Tunnel,
+# so no port is opened on the NAS or the router:
+#
+#   route1.getride.my -> get-route:8000   needs X-Route-Key (ROUTE_API_KEY)
+#
+# Values come from .env next to this file (copy .env.example).
+services:
+  get-route:
+    build: ../..
+    platform: linux/amd64
+    image: get-route:1
+    container_name: get-route
+    restart: unless-stopped
+    # Chrome needs a large /dev/shm.
+    shm_size: 800m
+    environment:
+      PORT: "8000"
+      ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
+    expose:
+      - "8000"
+    mem_limit: 2g
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: get-route-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env}
+    depends_on:
+      - get-route
+    mem_limit: 256m

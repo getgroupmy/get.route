@@ -4,13 +4,35 @@ prefix, so code generated against the hosted API on RapidAPI (paths like
 
 Params are validated by the same schemas the hosted API uses
 (waze/schemas.py): a bad or unknown param is a 400 that names the field."""
+import hmac
 import json
 
-from bottle import request, response, route
+from bottle import hook, request, response, route
+
+import config
 
 from schema_fields import load_query
 from waze import api, schemas
 from waze.fetch import WazeBadRequest, WazeNotFound
+
+
+OPEN_PATHS = {"/", "/health"}
+
+
+@hook("before_request")
+def require_key():
+    """With ROUTE_API_KEY set, every endpoint but the health check needs the
+    same value in the X-Route-Key header (GET.ride's ai-route-proxy sends
+    it). Without it the API is open, as before: fine on your own computer,
+    never behind a public tunnel."""
+    expected = config.route_api_key()
+    if not expected or request.path in OPEN_PATHS:
+        return
+    given = request.get_header("X-Route-Key") or ""
+    if not hmac.compare_digest(given.encode(), expected.encode()):
+        from bottle import HTTPResponse
+        raise HTTPResponse(json.dumps({"error": "missing or wrong X-Route-Key"}), status=401,
+                           headers={"Content-Type": "application/json"})
 
 
 def json_response(data, status=200):
