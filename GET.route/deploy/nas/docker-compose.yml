@@ -1,45 +1,114 @@
-# GET.route on the office NAS (see README.md): Waze route servers that
-# GET.ride's Fare AI calls. Each container has its own Chrome, so its own
-# reCAPTCHA tokens (about 25 Waze calls a minute each). In Admin › Fare AI,
-# add each one as a Waze server and give it an area (country / state /
-# city / suburb) to split the load.
+# GET.route on the office NAS (see README.md): one Waze route server per
+# Malaysian state and federal territory, 16 in all. Each container has its
+# own Chrome, so its own reCAPTCHA tokens (about 25 Waze calls a minute
+# each). In Admin › Fare AI, add each one as a Waze server with its state
+# as its area.
 #
 # Reached only through one Cloudflare Tunnel, so no port is opened on the
-# NAS or the router. In the tunnel, add one public hostname per container:
+# NAS or the router. In the tunnel, add one public hostname per container,
+# route-<name>.getride.my -> http://get-route-<name>:8000:
 #
-#   route1.getride.my -> http://get-route-1:8000
-#   route2.getride.my -> http://get-route-2:8000
-#   route3.getride.my -> http://get-route-3:8000
+#   route-johor.getride.my -> http://get-route-johor:8000   (Johor)
+#   route-kedah.getride.my -> http://get-route-kedah:8000   (Kedah)
+#   route-kelantan.getride.my -> http://get-route-kelantan:8000   (Kelantan)
+#   route-melaka.getride.my -> http://get-route-melaka:8000   (Melaka)
+#   route-negeri-sembilan.getride.my -> http://get-route-negeri-sembilan:8000   (Negeri Sembilan)
+#   route-pahang.getride.my -> http://get-route-pahang:8000   (Pahang)
+#   route-perak.getride.my -> http://get-route-perak:8000   (Perak)
+#   route-perlis.getride.my -> http://get-route-perlis:8000   (Perlis)
+#   route-penang.getride.my -> http://get-route-penang:8000   (Pulau Pinang)
+#   route-sabah.getride.my -> http://get-route-sabah:8000   (Sabah)
+#   route-sarawak.getride.my -> http://get-route-sarawak:8000   (Sarawak)
+#   route-selangor.getride.my -> http://get-route-selangor:8000   (Selangor)
+#   route-terengganu.getride.my -> http://get-route-terengganu:8000   (Terengganu)
+#   route-kuala-lumpur.getride.my -> http://get-route-kuala-lumpur:8000   (W.P. Kuala Lumpur)
+#   route-labuan.getride.my -> http://get-route-labuan:8000   (W.P. Labuan)
+#   route-putrajaya.getride.my -> http://get-route-putrajaya:8000   (W.P. Putrajaya)
 #
-# Every call but /health needs X-Route-Key (ROUTE_API_KEY). Need more?
-# Copy a get-route-N block, give it the next number, and add its hostname.
-# Each container uses about 1.5 GB of memory (capped at 2 GB).
+# Every call but /health needs X-Route-Key (ROUTE_API_KEY).
+#
+# Memory: each container is capped at 1 GB (MEM_PER_SERVER in .env). Chrome
+# closes after 10 idle minutes, so a quiet state's container should sit well
+# under its cap until its next trip. These are estimates, not measurements:
+# check Container Manager after a busy day (see README.md, "Memory").
 x-get-route: &get-route
   build: ../..
   platform: linux/amd64
   image: get-route:1
   restart: unless-stopped
-  # Chrome needs a large /dev/shm.
-  shm_size: 800m
+  # Chrome needs a large /dev/shm (tmpfs: it only takes memory when used).
+  shm_size: 512m
   environment:
     PORT: "8000"
     ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
   expose:
     - "8000"
-  mem_limit: 2g
+  mem_limit: ${MEM_PER_SERVER:-1g}
 
 services:
-  get-route-1:
+  get-route-johor:   # Johor
     <<: *get-route
-    container_name: get-route-1
+    container_name: get-route-johor
 
-  get-route-2:
+  get-route-kedah:   # Kedah
     <<: *get-route
-    container_name: get-route-2
+    container_name: get-route-kedah
 
-  get-route-3:
+  get-route-kelantan:   # Kelantan
     <<: *get-route
-    container_name: get-route-3
+    container_name: get-route-kelantan
+
+  get-route-melaka:   # Melaka
+    <<: *get-route
+    container_name: get-route-melaka
+
+  get-route-negeri-sembilan:   # Negeri Sembilan
+    <<: *get-route
+    container_name: get-route-negeri-sembilan
+
+  get-route-pahang:   # Pahang
+    <<: *get-route
+    container_name: get-route-pahang
+
+  get-route-perak:   # Perak
+    <<: *get-route
+    container_name: get-route-perak
+
+  get-route-perlis:   # Perlis
+    <<: *get-route
+    container_name: get-route-perlis
+
+  get-route-penang:   # Pulau Pinang
+    <<: *get-route
+    container_name: get-route-penang
+
+  get-route-sabah:   # Sabah
+    <<: *get-route
+    container_name: get-route-sabah
+
+  get-route-sarawak:   # Sarawak
+    <<: *get-route
+    container_name: get-route-sarawak
+
+  get-route-selangor:   # Selangor
+    <<: *get-route
+    container_name: get-route-selangor
+
+  get-route-terengganu:   # Terengganu
+    <<: *get-route
+    container_name: get-route-terengganu
+
+  get-route-kuala-lumpur:   # W.P. Kuala Lumpur
+    <<: *get-route
+    container_name: get-route-kuala-lumpur
+
+  get-route-labuan:   # W.P. Labuan
+    <<: *get-route
+    container_name: get-route-labuan
+
+  get-route-putrajaya:   # W.P. Putrajaya
+    <<: *get-route
+    container_name: get-route-putrajaya
 
   cloudflared:
     image: cloudflare/cloudflared:2026.9.3
@@ -49,7 +118,20 @@ services:
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env}
     depends_on:
-      - get-route-1
-      - get-route-2
-      - get-route-3
+      - get-route-johor
+      - get-route-kedah
+      - get-route-kelantan
+      - get-route-melaka
+      - get-route-negeri-sembilan
+      - get-route-pahang
+      - get-route-perak
+      - get-route-perlis
+      - get-route-penang
+      - get-route-sabah
+      - get-route-sarawak
+      - get-route-selangor
+      - get-route-terengganu
+      - get-route-kuala-lumpur
+      - get-route-labuan
+      - get-route-putrajaya
     mem_limit: 256m
