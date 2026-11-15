@@ -85,6 +85,13 @@ pinned at 100% means you are fine.
 2. In Cloudflare Zero Trust › Networks › Tunnels, create a tunnel
    (Docker). Copy the token. Add **one** public hostname:
    `route.getride.my` → `http://get-route-pool:8000`.
+
+   GET.ride's subdomain worker (`cloudflare/subdomain-proxy` in
+   getgroupmy/get-ride) answers every `*.getride.my` name with the web app,
+   tunnel hostnames included, unless the name is in its pass-through list.
+   `route` is in `PASS_THROUGH` in its `wrangler.toml`; if the repository
+   variable `SUBDOMAIN_PROXY_PASS_THROUGH` is set, it replaces that list,
+   so `route` must be in the variable too (e.g. `stats,route`).
 3. In `deploy/nas`, copy `.env.example` to `.env`; set `TUNNEL_TOKEN` and
    `ROUTE_API_KEY` (`openssl rand -hex 32`).
 4. Start it: Container Manager › Project › Create, path `deploy/nas`, or
@@ -95,12 +102,14 @@ pinned at 100% means you are fine.
    ```
 
 5. Check it from anywhere: `https://route.getride.my/health` answers
-   `{"status": "ok", "pool": 16}`.
-6. In GET.ride, **Admin › Settings › Fare AI provider**: set the data
-   source to **Waze (GET.route)**, add **one** server with the URL
-   `https://route.getride.my` and the key, leave its area on **All
-   regions**, tap **Test**, then **Save changes**. Choose what happens when
-   the pool fails: ask the AI instead, or no estimate.
+   `{"status": "ok", "pool": 16}`. If it shows the GET.ride web page
+   instead, the subdomain worker is still catching `route` (step 2).
+6. In GET.ride, **Admin › Settings › Fare AI provider**: set the fare
+   data order to **Waze, then AI, then OSRM**. On the Waze server card for
+   `https://route.getride.my` (add one if there is none; leave its area on
+   **All regions**), paste the `ROUTE_API_KEY`, switch it on, tap **Test**,
+   then **Save changes**. Fares the pool can't answer within 3 s go to the
+   AI, then OSRM.
 
 The first query opens Chrome in `get-route-01` (about 20–40 s); after that
 answers take about 1–3 s.
