@@ -54,16 +54,22 @@ Each container is capped at 1 GB (`MEM_PER_SERVER`), so 16 can use up to
 minutes, so containers for quiet states stay small. **These are estimates;
 nothing has been measured on the NAS yet.**
 
-The DS224+ has 18 GB, and the OSRM maps already use about 5 GB, which
-leaves about 13 GB. That is enough only if not every state is busy at the
-same time. Start the containers and watch Container Manager through a busy
-day:
+The DS224+ has 18 GB (its built-in 2 GB plus one 16 GB module), which is
+the most it can take, so memory cannot be added. DSM, the OSRM maps (about
+5 GB) and the face match server already use part of it; on a 1 GB cap per
+container, roughly 11 of the 16 can be at full size at once, which is
+enough when not every state is busy together. Check how much is free in
+Resource Monitor before starting them, then watch Container Manager through
+a busy day:
 
-- If containers are stopped for running out of memory, add RAM if the NAS
-  takes more, or move some states to a second machine (copy this folder,
-  keep only those states, and give it its own tunnel).
-- The DS224+'s 4-core Celeron also runs 16 Chrome windows. If fares slow
-  down at peak, that is the likely limit; the same fix applies.
+- A container that runs out of memory is stopped and restarts by itself
+  (`restart: unless-stopped`); meanwhile its trips go to the backup servers,
+  and the admins get the offline push if it stays down 5 minutes.
+- If that keeps happening, or fares slow down at peak (the 4-core Celeron
+  J4125 also runs every Chrome window), move the quietest states to a
+  second machine on an office or home connection: copy this folder there,
+  keep only those states in `docker-compose.yml`, and give it its own
+  tunnel.
 
 ## Set it up
 
