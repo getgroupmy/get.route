@@ -90,7 +90,24 @@ for _path, _schema, _fn in ENDPOINTS:
     mount(_path, _schema, _fn)
 
 
+def _iso(ts):
+    import datetime
+    return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
+
+
 @route("/", method="GET")
 @route("/health", method="GET")
 def health():
-    return json_response({"status": "ok", "endpoints": [p for p, _, _ in ENDPOINTS]})
+    """Always open. With the right X-Route-Key (or no key configured) it also
+    says how the latest Waze calls went, which GET.ride's health check uses
+    to tell the admins when Waze starts refusing this server. It spends no
+    Waze call."""
+    out = {"status": "ok", "endpoints": [p for p, _, _ in ENDPOINTS]}
+    expected = config.route_api_key()
+    given = request.get_header("X-Route-Key") or ""
+    if not expected or hmac.compare_digest(given.encode(), expected.encode()):
+        from waze.fetch import recent_status
+        st = recent_status()
+        out["waze"] = {"last_ok_at": _iso(st["last_ok_at"]), "last_error_at": _iso(st["last_error_at"]),
+                       "last_error": st["last_error"]}
+    return json_response(out)
