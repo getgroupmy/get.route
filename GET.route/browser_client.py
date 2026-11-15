@@ -173,6 +173,42 @@ threading.Thread(target=_idle_reaper, daemon=True, name="waze-chrome-reaper").st
 
 # ---- actions ---------------------------------------------------------------------------
 
+def warm_status(proxy=None):
+    """'open' when the window for `proxy` is up, 'starting' while it loads, else 'closed'."""
+    with _browsers_lock:
+        b = _browsers.get(proxy)
+    if b is None:
+        return "closed"
+    if b.lock.locked() and b.driver is None:
+        return "starting"
+    return "open" if b.driver is not None else "closed"
+
+
+def prewarm(proxy=None):
+    """Open the window for `proxy` in the background (google.com, then the live
+    map, then wait for reCAPTCHA) without minting a token, so the next call
+    finds Chrome ready instead of waiting 20-40 s. The pool dispatcher asks
+    for this before it sends a container traffic. Returns at once; a failure
+    only leaves the window closed (the next call opens it as usual)."""
+    b = _browser(proxy)
+    if b.driver is not None or b.lock.locked():
+        b.last_use = time.monotonic()
+        return False
+
+    def run():
+        with b.lock:
+            b.last_use = time.monotonic()
+            if b.driver is None:
+                try:
+                    b.warm()
+                except Exception as e:
+                    print(f"waze: pre-warm failed: {type(e).__name__}: {e}", flush=True)
+            b.last_use = time.monotonic()
+
+    threading.Thread(target=run, daemon=True, name="waze-chrome-prewarm").start()
+    return True
+
+
 def token(site, input=None, proxy=None, variant="", timeout=None):
     """One token from the window for `proxy` (opened on first use)."""
     b = _browser(proxy)

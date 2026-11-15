@@ -90,6 +90,17 @@ for _path, _schema, _fn in ENDPOINTS:
     mount(_path, _schema, _fn)
 
 
+@route("/warm", method="POST")
+@route("/waze/warm", method="POST")
+def warm():
+    """Open Chrome ahead of traffic (the pool dispatcher calls this when the
+    container before this one reaches its warm-up count). Spends no Waze
+    call and no token. Needs X-Route-Key like every endpoint but /health."""
+    import browser_client
+    started = browser_client.prewarm(config.waze_mint_proxy())
+    return json_response({"warming": started, "chrome": browser_client.warm_status(config.waze_mint_proxy())})
+
+
 def _iso(ts):
     import datetime
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else None
@@ -110,4 +121,6 @@ def health():
         st = recent_status()
         out["waze"] = {"last_ok_at": _iso(st["last_ok_at"]), "last_error_at": _iso(st["last_error_at"]),
                        "last_error": st["last_error"]}
+        import browser_client
+        out["chrome"] = browser_client.warm_status(config.waze_mint_proxy())
     return json_response(out)
