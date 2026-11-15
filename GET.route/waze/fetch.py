@@ -128,6 +128,29 @@ def _drop_session():
             pass
 
 
+# ---- recent results (for /health) --------------------------------------------------
+# What GET.ride's health check reads, without spending a Waze call: when the
+# last call worked and when the last one failed (retries exhausted, every
+# token refused, no token). A 400 / 404 is Waze answering, so it counts as ok.
+_status_lock = threading.Lock()
+_status = {"last_ok_at": None, "last_error_at": None, "last_error": None}
+
+
+def _note(ok, error=None):
+    with _status_lock:
+        if ok:
+            _status["last_ok_at"] = time.time()
+        else:
+            _status["last_error_at"] = time.time()
+            _status["last_error"] = str(error)[:200]
+
+
+def recent_status():
+    """{last_ok_at, last_error_at (epoch seconds or None), last_error}."""
+    with _status_lock:
+        return dict(_status)
+
+
 def _retrying(fn):
     """config.MAX_RETRIES attempts for the retryable errors (UpstreamError
     incl. Blocked), a fresh session (exit) each time; NotFound / BadRequest
@@ -173,7 +196,16 @@ def _call(method, path, label, params=None, json_body=None):
                 continue
             return _classify(resp, label)
         raise WazeBlocked(f"{label}: {config.WAZE_TOKEN_ATTEMPTS} reCAPTCHA tokens refused (HTTP {refused})")
-    return _retrying(once)
+    try:
+        body = _retrying(once)
+    except WazeUpstreamError as e:
+        _note(False, e)
+        raise
+    except (WazeBadRequest, WazeNotFound):
+        _note(True)
+        raise
+    _note(True)
+    return body
 
 
 def _classify(resp, label):

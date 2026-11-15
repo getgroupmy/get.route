@@ -2,6 +2,9 @@
 environment variable; the defaults work out of the box.
 
     PORT        port the API listens on (default 8000)
+    ROUTE_API_KEY  when set, every endpoint but /health needs it in the
+                X-Route-Key header (set it whenever the API is reachable from
+                outside this machine, e.g. through a Cloudflare Tunnel)
     WAZE_PROXY  proxy URL for the API calls to Waze, e.g.
                 http://user:pass@host:port (default: none — direct). In our
                 tests Waze limited each reCAPTCHA token, never the IP, so
@@ -48,3 +51,8 @@ def waze_proxy():
 def waze_mint_proxy():
     """The Chrome window always runs on your own connection."""
     return None
+
+
+def route_api_key():
+    """The secret callers must send in X-Route-Key (None = the API is open)."""
+    return os.environ.get("ROUTE_API_KEY") or None

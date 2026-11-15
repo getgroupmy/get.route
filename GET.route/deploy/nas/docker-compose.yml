@@ -1,0 +1,139 @@
+# GET.route on the office NAS (see README.md): a pool of 16 Waze route
+# containers behind one dispatcher, for all of Malaysia. GET.ride's Fare AI
+# lists only the dispatcher, as one Waze server:
+#
+#   route.getride.my -> http://get-route-pool:8000   needs X-Route-Key
+#
+# The dispatcher (pool_server.py) sends every query to container 01 until it
+# has served 23 in the last minute, then to 02, and so on; when a container
+# serves its 10th query of the minute, the next one opens Chrome ahead of
+# time. Containers nobody sends work to close Chrome after 10 idle minutes,
+# so usually only one or two use real memory. A container that fails is
+# skipped for 60 s and the query goes to the next.
+#
+# The containers have no hostname of their own: only the dispatcher is in
+# the Cloudflare Tunnel, so no port is opened on the NAS or the router.
+x-get-route: &get-route
+  build: ../..
+  platform: linux/amd64
+  image: get-route:1
+  restart: unless-stopped
+  # Chrome needs a large /dev/shm (tmpfs: it only takes memory when used).
+  shm_size: 512m
+  environment:
+    PORT: "8000"
+    ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
+  expose:
+    - "8000"
+  mem_limit: ${MEM_PER_SERVER:-1g}
+
+services:
+  get-route-pool:
+    build: ../..
+    platform: linux/amd64
+    image: get-route:1
+    container_name: get-route-pool
+    restart: unless-stopped
+    command: ["python", "pool_server.py"]
+    environment:
+      PORT: "8000"
+      ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
+      POOL_SERVERS: http://get-route-01:8000,http://get-route-02:8000,http://get-route-03:8000,http://get-route-04:8000,http://get-route-05:8000,http://get-route-06:8000,http://get-route-07:8000,http://get-route-08:8000,http://get-route-09:8000,http://get-route-10:8000,http://get-route-11:8000,http://get-route-12:8000,http://get-route-13:8000,http://get-route-14:8000,http://get-route-15:8000,http://get-route-16:8000
+      POOL_SWITCH_AT: ${POOL_SWITCH_AT:-23}
+      POOL_WARM_AT: ${POOL_WARM_AT:-10}
+      POOL_REST_SECONDS: ${POOL_REST_SECONDS:-60}
+    expose:
+      - "8000"
+    depends_on:
+      - get-route-01
+      - get-route-02
+      - get-route-03
+      - get-route-04
+      - get-route-05
+      - get-route-06
+      - get-route-07
+      - get-route-08
+      - get-route-09
+      - get-route-10
+      - get-route-11
+      - get-route-12
+      - get-route-13
+      - get-route-14
+      - get-route-15
+      - get-route-16
+    mem_limit: 256m
+
+  get-route-01:
+    <<: *get-route
+    container_name: get-route-01
+
+  get-route-02:
+    <<: *get-route
+    container_name: get-route-02
+
+  get-route-03:
+    <<: *get-route
+    container_name: get-route-03
+
+  get-route-04:
+    <<: *get-route
+    container_name: get-route-04
+
+  get-route-05:
+    <<: *get-route
+    container_name: get-route-05
+
+  get-route-06:
+    <<: *get-route
+    container_name: get-route-06
+
+  get-route-07:
+    <<: *get-route
+    container_name: get-route-07
+
+  get-route-08:
+    <<: *get-route
+    container_name: get-route-08
+
+  get-route-09:
+    <<: *get-route
+    container_name: get-route-09
+
+  get-route-10:
+    <<: *get-route
+    container_name: get-route-10
+
+  get-route-11:
+    <<: *get-route
+    container_name: get-route-11
+
+  get-route-12:
+    <<: *get-route
+    container_name: get-route-12
+
+  get-route-13:
+    <<: *get-route
+    container_name: get-route-13
+
+  get-route-14:
+    <<: *get-route
+    container_name: get-route-14
+
+  get-route-15:
+    <<: *get-route
+    container_name: get-route-15
+
+  get-route-16:
+    <<: *get-route
+    container_name: get-route-16
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: get-route-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env}
+    depends_on:
+      - get-route-pool
+    mem_limit: 256m
