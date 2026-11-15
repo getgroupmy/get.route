@@ -7,6 +7,51 @@ import re
 import time
 from datetime import datetime, timedelta
 
+# A route total as Google Maps writes it in English: "35 min (12.3 km)",
+# "3 hr 45 min (350 km)", "3 h 45 min (350 km)", "1 day 2 hr (1,900 km)",
+# "4 min (900 m)". The lookbehind stops a road code fusing with the time
+# ("E12 35 min" must not read as "1235 min").
+DURATION_DISTANCE = re.compile(
+    r'(?<![\w/])'
+    r'(?:(\d+)\s*days?\s*)?'
+    r'(?:(\d+)\s*(?:hrs?|h)\b\s*)?'
+    r'(?:(\d+)\s*mins?\b\s*)?'
+    r'\(\s*([\d.,]+)\s*(km|m)\s*\)'
+)
+# A number with a unit this parser does not know, right before a match
+# ("3 Std. 45 min"): the match would drop that part, so it is refused.
+UNREAD_UNIT_BEFORE = re.compile(r'(?<![\w.])\d+\s*[^\W\d_]{1,6}\.?\s*$')
+
+
+def parse_route_total(panel_text):
+    """(minutes, km) of the route total: the FIRST "time (distance)" in the
+    directions panel (later ones are per-step). Raises ValueError rather than
+    return a wrong number when the text is not fully understood."""
+    for m in DURATION_DISTANCE.finditer(panel_text):
+        days, hours, mins, dist, unit = m.groups()
+        if not (days or hours or mins):
+            continue                      # "(12 km)" with no time: not a total
+        if UNREAD_UNIT_BEFORE.search(panel_text[:m.start()]):
+            raise ValueError(f"unrecognised time unit before {m.group(0)!r}")
+        if "," in dist and "." not in dist and re.search(r",\d{1,2}$", dist):
+            raise ValueError(f"decimal comma in {m.group(0)!r}; load the page in English (hl=en)")
+        km = float(dist.replace(",", ""))
+        if unit == "m":
+            km /= 1000
+        return int(days or 0) * 1440 + int(hours or 0) * 60 + int(mins or 0), round(km, 3)
+    raise ValueError("no route time/distance in the directions panel")
+
+
+def with_english(url):
+    """The URL with hl=en, so the page (and "Directions from") is in English.
+    The rest of the URL is left exactly as copied."""
+    base, sep, fragment = url.partition("#")
+    path, _, query = base.partition("?")
+    params = [p for p in query.split("&") if p and not p.startswith("hl=")]
+    params.append("hl=en")
+    return path + "?" + "&".join(params) + (sep + fragment if sep else "")
+
+
 class TrafficScraper:
     def __init__(self, places, urls, headless=True):
         if not places or not urls:
@@ -31,13 +76,19 @@ class TrafficScraper:
         for idx, url in enumerate(self.urls):
             driver = webdriver.Chrome(options=self.chrome_options)
             try:
-                driver.get(url)
-                time.sleep(3)  # Wait for the page to load
-                page_source = driver.page_source
+                driver.get(with_english(url))
+                # Wait (up to ~20s) for the directions panel instead of a fixed 3s
+                for _ in range(20):
+                    time.sleep(1)
+                    page_source = driver.page_source
+                    if "Directions from" in page_source:
+                        time.sleep(1)
+                        page_source = driver.page_source
+                        break
             except Exception as e:
-                driver.quit()
                 raise ConnectionError(f"Failed to load page {url}: {str(e)}")
-            driver.quit()
+            finally:
+                driver.quit()
             
             soup = BS(page_source, "html.parser")
             try:
@@ -49,28 +100,14 @@ class TrafficScraper:
             if section is None:
                 raise ValueError(f"Could not find traffic section for {self.places[idx]}")
             
-            for span in section.find_all('span'):
-                trial_text = span.get_text()
-                match = re.search(r'(([0-9]+) hr \(([0-9.]+) km\))|(([0-9]+) min \(([0-9.]+) km\))|(([0-9]+) hr ([0-9]+) min \(([0-9.]+) km\))', trial_text)
-                if match:
-                    if match.group(2) and match.group(3):
-                        # X hr (Y km)
-                        traffic_data[self.places[idx]] = {
-                            "time": int(match.group(2)) * 60,
-                            "distance": float(match.group(3))
-                        }
-                    elif match.group(5) and match.group(6):
-                        # X min (Y km)
-                        traffic_data[self.places[idx]] = {
-                            "time": int(match.group(5)),
-                            "distance": float(match.group(6))
-                        }
-                    elif match.group(8) and match.group(9) and match.group(10):
-                        # X hr Y min (Z km)
-                        traffic_data[self.places[idx]] = {
-                            "time": int(match.group(8)) * 60 + int(match.group(9)),
-                            "distance": float(match.group(10))
-                        }
+            # Join span texts with a separator so adjacent text (e.g. road code
+            # "E12" + "35 min") can't fuse into "E1235 min".
+            panel_text = section.get_text(" ", strip=True)
+            try:
+                minutes, km = parse_route_total(panel_text)
+            except ValueError as e:
+                raise ValueError(f"Could not read route time/distance for {self.places[idx]}: {e}")
+            traffic_data[self.places[idx]] = {"time": minutes, "distance": km}
         self.data = traffic_data
         return traffic_data
 

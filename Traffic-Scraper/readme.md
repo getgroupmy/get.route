@@ -1,8 +1,13 @@
 > **Source:** copied from <https://github.com/Hariharan-Durairaj/Traffic-Scraper>
 > (commit `3ae0d75`) by Hariharan Durairaj. That repository has no license
 > file, so its author keeps all rights; it is included here at the owner's
-> request, unchanged. Not yet tested: the sandbox it was copied from cannot
-> reach google.com.
+> request. Changed here: the owner's patch (wait for the directions panel;
+> take the route total, the first "time (distance)" in the panel, not the
+> last step), plus "h" / "day" units, a refusal instead of a wrong number
+> when a time unit can't be read, `hl=en` on every URL so the page is in
+> English, and Chrome always closed. Parsing tests, no browser needed:
+> `python -m pytest test_traffic_scraper.py`. Not tested against live
+> Google Maps from here: the sandbox cannot reach google.com.
 
 # TrafficScraper
 
