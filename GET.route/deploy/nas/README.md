@@ -23,16 +23,23 @@ single Waze server.
   **10th query of the minute**, the dispatcher tells the next one to open
   Chrome (20–40 s), so it is ready before the spill-over reaches it. Warming
   spends no Waze call.
-- **Idle containers cost little.** A container with no work closes Chrome
-  after 10 minutes, so on a normal day only one or two hold real memory.
+- **The first container stays warm.** Every 4 minutes the dispatcher asks
+  `get-route-01` to open (or keep) Chrome, so on a quiet day fares don't
+  meet a container still starting Chrome, which takes longer than GET.ride
+  waits. If 01 is resting after a failure, 02 is kept warm instead.
+  `POOL_KEEP_WARM` (how many, `0` = off) and `POOL_KEEP_WARM_SECONDS` in
+  `.env`.
+- **Idle containers cost little.** Any other container with no work closes
+  Chrome after 10 minutes, so on a normal day only one or two hold real
+  memory (about 1 GB with 01 always open).
 - **Failures are skipped.** A container that does not answer, answers 5xx,
   or refuses the key rests for 60 s and the query is retried on the next
   one. Waze's own "no route" (400) and "not found" (404) are passed back.
 - **Capacity:** 16 × 23 ≈ 368 Waze calls a minute in all. A trip with stops
   costs one call per leg.
 
-The three numbers are in `.env` (`POOL_SWITCH_AT`, `POOL_WARM_AT`,
-`POOL_REST_SECONDS`); the rules are in `pool.py`, tested in `test_pool.py`.
+The numbers are in `.env` (`POOL_SWITCH_AT`, `POOL_WARM_AT`,
+`POOL_REST_SECONDS`, `POOL_KEEP_WARM`, `POOL_KEEP_WARM_SECONDS`); the rules are in `pool.py`, tested in `test_pool.py`.
 
 **Bursts.** Steady traffic never waits for Chrome. If queries 10 to 24 of
 a minute all arrive within the 20–40 s the next container needs to start,
