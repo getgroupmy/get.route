@@ -7,8 +7,11 @@ Chrome that earns the reCAPTCHA token Waze asks for.
 
 In production it runs on the office NAS as a pool of 16 containers behind one
 dispatcher, reached through a Cloudflare Tunnel at `https://route.getride.my`.
-GET.ride's `ai-route-proxy` asks it first for every fare estimate (Admin ›
-Settings › Fare AI provider, fare data order **Waze, then AI, then OSRM**).
+GET.ride's `ai-route-proxy` asks it as the **Waze** step of the fare data
+order (Admin › Settings › Fare AI provider), usually first: **Waze, then
+Google Maps, then Apple Maps, then AI, then OSRM**. The Waze / Google Maps /
+Apple Maps balance can send a share of fares to Google Maps or Apple Maps
+first; Waze takes the rest.
 
 ```
  rider app ──► ai-route-proxy ──https──► route.getride.my ──► Cloudflare Tunnel ──► get-route-pool ──► get-route-01 … 16
@@ -22,9 +25,11 @@ Based on [omkarcloud/waze-scraper](https://github.com/omkarcloud/waze-scraper)
 
 - **`/routes/search`** for every fare: GET.ride asks for one route
   (`max_routes=1`) per leg and adds up the legs of a trip with stops. It
-  reads the distance, the drive time and the toll price, and gives Waze
-  **3 seconds** per trip, so the AI and OSRM can still answer within the
-  5 seconds the rider app waits.
+  reads the distance, the drive time and the toll price. Waze gets
+  **2 seconds** per trip by default (every leg included), then the fare
+  goes to the next step. Admins set it, and every other step's time, in
+  **Admin › Fare AI provider › Time limits**, along with how long the rider
+  app waits in all (7 s).
 - **`/health`** once a minute (`waze-server-health`). With the key it also
   says when the last Waze call worked or failed, so GET.ride can tell
   admins when Waze starts refusing the server, without spending a Waze
@@ -159,8 +164,11 @@ tests check the dispatcher's rules. Neither needs a network or Chrome.
 
 - **Waze's terms.** This reads Waze's private live-map API through an
   automated browser, which Waze's terms very likely forbid. GET.ride keeps
-  the AI and OSRM after Waze in the fare order, so fares keep working if
-  Waze blocks it.
+  other steps after Waze in the fare order (Apple Maps' official API, the
+  AI, OSRM), so fares keep working if Waze blocks it.
+- **Speed matters more than load.** On a quiet day the risk is a container
+  still starting Chrome, not too many calls; that is what keeping
+  container 01 warm is for (see "The pool").
 - **It can break when Waze changes.** The reCAPTCHA site key, the API paths
   and the answer shapes are taken from the live map's code as of November
   2026.
