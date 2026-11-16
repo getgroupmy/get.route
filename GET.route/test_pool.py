@@ -69,3 +69,13 @@ def test_bad_settings():
         Pool([])
     with pytest.raises(ValueError):
         Pool(URLS, switch_at=10, warm_at=11)
+
+
+def test_keep_warm_the_first_container_or_the_next_when_it_rests():
+    p = Pool(URLS)
+    assert p.keep_warm_targets(1, now=0.0) == [0]
+    assert p.keep_warm_targets(2, now=0.0) == [0, 1]
+    assert p.keep_warm_targets(0, now=0.0) == []
+    p.failed(0, "HTTP 502", now=0.0)
+    assert p.keep_warm_targets(1, now=10.0) == [1]       # container 1 rests: keep 2 warm
+    assert p.keep_warm_targets(1, now=61.0) == [0]       # back after its rest

@@ -16,6 +16,11 @@ warmed ahead of time: when a container serves its WARM_AT-th query within
 the minute (10 by default), the one after it is told to open Chrome. A
 container that failed (no answer, 5xx, refused key) rests for REST_SECONDS
 and the query is retried on the next one.
+
+Between fares the first container(s) are kept warm (keep_warm_targets):
+pool_server.py asks them to open Chrome every few minutes, well inside the
+containers' 10 idle minutes, so a quiet day's fares don't each meet a cold
+container (20-40 s, longer than GET.ride waits). Warming spends no Waze call.
 """
 import threading
 import time
@@ -84,6 +89,14 @@ class Pool:
             self._warmed_at[j] = now
             return j
         return None
+
+    def keep_warm_targets(self, n, now=None):
+        """The first [n] containers that are not resting: the ones traffic
+        reaches first, so their Chrome is kept open between fares. A resting
+        container is passed over for the next one."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            return [i for i in range(len(self.urls)) if self._resting_until[i] <= now][:max(0, n)]
 
     def failed(self, i, error, now=None):
         """Container i did not answer usefully: rest it and keep the reason."""

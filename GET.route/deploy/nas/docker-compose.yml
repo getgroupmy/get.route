@@ -42,6 +42,9 @@ services:
       POOL_SWITCH_AT: ${POOL_SWITCH_AT:-23}
       POOL_WARM_AT: ${POOL_WARM_AT:-10}
       POOL_REST_SECONDS: ${POOL_REST_SECONDS:-60}
+      # Keep Chrome open in the first container between fares (0 = off).
+      POOL_KEEP_WARM: ${POOL_KEEP_WARM:-1}
+      POOL_KEEP_WARM_SECONDS: ${POOL_KEEP_WARM_SECONDS:-240}
     expose:
       - "8000"
     depends_on:

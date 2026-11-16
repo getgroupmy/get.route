@@ -12,6 +12,10 @@ the next one warmed at the 10th).
     POOL_SWITCH_AT   queries per container per minute before the next (23)
     POOL_WARM_AT     query of the minute that warms the next container (10)
     POOL_REST_SECONDS how long a failing container is skipped (60)
+    POOL_KEEP_WARM   how many containers (the first ones) to keep Chrome open
+                     in between fares (1; 0 = off)
+    POOL_KEEP_WARM_SECONDS how often they are asked (240; under the
+                     containers' 600 idle seconds, so Chrome never closes)
     PORT             port to listen on (8000)
 
 A query a container could not serve (no answer, 5xx, refused key) is tried
@@ -34,6 +38,7 @@ from cheroot import wsgi
 
 from pool import Pool
 
+KEEP_WARM_MIN, KEEP_WARM_MAX = 30, 540   # under the containers' BROWSER_IDLE (600 s)
 FORWARD_TIMEOUT = 75      # a cold container opens Chrome (20-40 s) before it answers
 WARM_TIMEOUT = 5
 
@@ -46,6 +51,9 @@ KEY = os.environ.get("ROUTE_API_KEY") or None
 URLS = [u.strip().rstrip("/") for u in (os.environ.get("POOL_SERVERS") or "").split(",") if u.strip()]
 POOL = Pool(URLS or ["http://localhost:8001"], switch_at=_env_int("POOL_SWITCH_AT", 23),
             warm_at=_env_int("POOL_WARM_AT", 10), rest_seconds=_env_int("POOL_REST_SECONDS", 60))
+
+KEEP_WARM = max(0, _env_int("POOL_KEEP_WARM", 1))
+KEEP_WARM_SECONDS = min(KEEP_WARM_MAX, max(KEEP_WARM_MIN, _env_int("POOL_KEEP_WARM_SECONDS", 240)))
 
 _status_lock = threading.Lock()
 _status = {"last_ok_at": None, "last_error_at": None, "last_error": None}
@@ -83,6 +91,16 @@ def _warm(i):
         except Exception as e:
             print(f"pool: warming container {i + 1} failed: {e}", flush=True)
     threading.Thread(target=run, daemon=True, name=f"pool-warm-{i + 1}").start()
+
+
+def _keep_warm_loop():
+    """Ask the first POOL_KEEP_WARM containers to open (or keep) Chrome, now
+    and every KEEP_WARM_SECONDS: /warm opens it when closed and resets its
+    idle clock when open, without a Waze call."""
+    while True:
+        for i in POOL.keep_warm_targets(KEEP_WARM):
+            _warm(i)
+        time.sleep(KEEP_WARM_SECONDS)
 
 
 def _forward(path_qs):
@@ -149,7 +167,10 @@ def main():
         raise SystemExit("Set POOL_SERVERS to the containers, in order (comma-separated URLs).")
     port = _env_int("PORT", 8000)
     print(f"GET.route pool: {len(URLS)} containers, next after {POOL.switch_at}/min, "
-          f"warm at {POOL.warm_at}; listening on :{port}", flush=True)
+          f"warm at {POOL.warm_at}, keeping {KEEP_WARM} warm every {KEEP_WARM_SECONDS} s; "
+          f"listening on :{port}", flush=True)
+    if KEEP_WARM:
+        threading.Thread(target=_keep_warm_loop, daemon=True, name="pool-keep-warm").start()
     server = wsgi.Server(("0.0.0.0", port), app, server_name="get-route-pool", numthreads=32)
     try:
         server.start()
