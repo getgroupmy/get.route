@@ -93,13 +93,17 @@ in `pool.py`:
 - When a container serves its **10th query of the minute**, the next one is
   told to open Chrome (`POST /warm`), so it is ready before traffic reaches
   it.
+- Container 01 is kept warm between fares: every 4 minutes the dispatcher
+  asks it to open (or keep) Chrome, so on a quiet day a fare doesn't meet a
+  container still starting Chrome (20-40 s, longer than GET.ride waits). If
+  01 is resting, 02 is kept warm instead. No Waze call is spent.
 - A container that fails (no answer, 5xx, refused key) rests 60 seconds and
   the query moves on. Waze's own 400 / 404 answers are passed back.
 - Its `/health` (with the key) lists each container's load, rest and last
   error.
 
 Capacity is about 16 × 23 ≈ 368 Waze calls a minute. The thresholds are
-`POOL_SWITCH_AT`, `POOL_WARM_AT` and `POOL_REST_SECONDS`.
+`POOL_SWITCH_AT`, `POOL_WARM_AT`, `POOL_REST_SECONDS` and `POOL_KEEP_WARM`.
 
 **Deploying on the office NAS:** see [`deploy/nas/README.md`](deploy/nas/README.md)
 (compose file, tunnel, `.env`, memory, the subdomain-worker pass-through and
@@ -137,6 +141,7 @@ screen are in the image).
 | `WAZE_PROXY` | none | A proxy for the calls to Waze (`http://user:pass@host:port`). Not needed: Waze limits tokens, not IPs. |
 | `POOL_SERVERS` | none | Dispatcher only: the containers, in order, comma-separated. |
 | `POOL_SWITCH_AT` / `POOL_WARM_AT` / `POOL_REST_SECONDS` | `23` / `10` / `60` | Dispatcher only: see "The pool". |
+| `POOL_KEEP_WARM` / `POOL_KEEP_WARM_SECONDS` | `1` / `240` | Dispatcher only: how many of the first containers keep Chrome open between fares (0 = off), and how often they are asked (30-540 s, under the containers' 600 idle seconds). |
 
 Token limits, retries and cache times are constants in `config.py` and
 `waze/cache_config.py`.
