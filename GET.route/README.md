@@ -1,163 +1,177 @@
-# 🚦 Waze Scraper
+# GET.route
 
-Waze Scraper is a **free and open-source** scraper that gets you **unlimited** live Waze traffic data for free.
+GET.route gives GET.ride live Waze traffic for fares: the real road distance,
+the drive time in current traffic, and the tolls on the way. It reads the same
+JSON API the Waze live map (waze.com/live-map) uses, through a real Google
+Chrome that earns the reCAPTCHA token Waze asks for.
 
-## ✨ What Can I Get?
+In production it runs on the office NAS as a pool of 16 containers behind one
+dispatcher, reached through a Cloudflare Tunnel at `https://route.getride.my`.
+GET.ride's `ai-route-proxy` asks it first for every fare estimate (Admin ›
+Settings › Fare AI provider, fare data order **Waze, then AI, then OSRM**).
 
-- 🚦 **Live traffic jams from 150M+ Waze drivers** — street, severity, speed, length, cause & road path
-- 🚧 **Live road closures in 185 countries** — street, location, reporter & time, newest first
-- 🧭 **Up to 3 driving routes per trip** — live ETA, distance, tolls with & without E-ZPass, jams on the way
-- 📍 **Places, addresses & time zones** — search like the Waze app, then phone, hours, services & photos
-
-## 🎥 Example: A Full Live Traffic Feed for Times Square
-
-```json
-{
-  "area": {
-    "south": 40.713084, "west": -74.044797, "north": 40.802916, "east": -73.926203,
-    "center": { "lat": 40.758, "lng": -73.9855 },
-    "region": "na"
-  },
-  "count": 149,
-  "jams": [
-    {
-      "id": 145650922,
-      "street": "Lincoln Tunnel",
-      "city": "Manhattan, NY",
-      "level": 5,
-      "severity": "standstill",
-      "speed_kmh": 0.0,
-      "length_meters": 1366,
-      "is_blocked": true,
-      "blocked_since": "2026-11-10T05:06:36Z",
-      "cause": { "type": "ROAD_CLOSED", "subtype": null, "description": null },
-      "updated_at": "2026-11-10T06:37:40Z",
-      "line": [{ "lat": 40.757535, "lng": -73.996752 }, { "lat": 40.76347, "lng": -74.010915 }],
-      "link": "https://www.waze.com/live-map/?latlng=40.763470,-74.010915&zoom=17"
-    },
-    {
-      "id": 145848722,
-      "street": "W 123rd St",
-      "city": "Manhattan, NY",
-      "end_node": "Amsterdam Ave",
-      "level": 3,
-      "severity": "heavy",
-      "speed_kmh": 4.0,
-      "length_meters": 814,
-      "is_blocked": false,
-      "updated_at": "2026-11-10T06:36:32Z",
-      "segments": [{ "id": 537596366, "from_node": 521100465, "to_node": 28570430, "is_forward": true }]
-    }
-  ]
-}
+```
+ rider app ──► ai-route-proxy ──https──► route.getride.my ──► Cloudflare Tunnel ──► get-route-pool ──► get-route-01 … 16
+ (GET.ride)    (Supabase)      X-Route-Key                                          (pool_server.py)    (run.py + Chrome)
 ```
 
-*Trimmed for readability.*
+Based on [omkarcloud/waze-scraper](https://github.com/omkarcloud/waze-scraper)
+(MIT, see `LICENSE`), changed for GET.ride as described below.
 
-## 🚀 Unlimited Free Waze Data — Get It in 60 Seconds
+## What GET.ride uses
 
-1️⃣ Clone and install:
+- **`/routes/search`** for every fare: GET.ride asks for one route
+  (`max_routes=1`) per leg and adds up the legs of a trip with stops. It
+  reads the distance, the drive time and the toll price, and gives Waze
+  **3 seconds** per trip, so the AI and OSRM can still answer within the
+  5 seconds the rider app waits.
+- **`/health`** once a minute (`waze-server-health`). With the key it also
+  says when the last Waze call worked or failed, so GET.ride can tell
+  admins when Waze starts refusing the server, without spending a Waze
+  call.
+
+The other endpoints work the same way and are there for later use.
+
+## Endpoints
+
+Every path also answers under `/waze` (e.g. `/waze/routes/search`). With
+`ROUTE_API_KEY` set, every call except `/health` needs the header
+`X-Route-Key: <key>`.
+
+| Path | Returns | Main parameters |
+|---|---|---|
+| `GET /routes/search` | Up to 3 driving routes: live ETA, distance, tolls, jams and alerts on the way | `from`, `to` (lat,lng, a Waze venue id, a Google place id, or a waze.com link), `depart_at` or `arrive_at` (ISO 8601), `max_routes` (1-3) |
+| `GET /jams/search` | Traffic jams around a point, worst first | `location` (lat,lng or a box south,west,north,east), `radius_km` (default 5, max 50), `min_level` (0-5), `limit` |
+| `GET /alerts/search` | Road closures and incidents, newest first | `location`, `radius_km`, `types`, `limit` |
+| `GET /places/search` | Places and addresses with coordinates and a place id | `query`, `near`, `language`, `limit` (max 20) |
+| `GET /places/details` | Address, phone, opening hours, services and photos | `place` (Waze venue id, Google place id or link), `language` |
+| `GET /geocode/reverse` | Street, city and time zone for a point | `location` |
+| `GET /health` | `{"status": "ok"}`; with the key also `waze` (last call ok / failed) and `chrome` (open / closed) | none |
+| `POST /warm` | Opens Chrome ahead of traffic, without spending a Waze call | none |
+
+A bad or unknown parameter is a `400` that names it; no route between two
+points (or a trip over 3,000 miles) is a `400` with Waze's reason; an
+unknown place is a `404`; Waze failing after its retries is a `500`.
+
+Example, KLCC to KL Sentral:
+
 ```bash
-git clone https://github.com/omkarcloud/waze-scraper
-cd waze-scraper
+curl -H "X-Route-Key: $ROUTE_API_KEY" \
+  "https://route.getride.my/routes/search?from=3.158,101.712&to=3.134,101.686&max_routes=1"
+```
+
+## How it works
+
+1. **Tokens.** Every Waze live-map call carries a reCAPTCHA Enterprise token.
+   Waze scores it, and refuses tokens from headless Chrome or captcha
+   services. So the first call opens one headed Google Chrome
+   (`browser_client.py`, `patchright_driver.py`; on a server without a
+   screen it starts a virtual one), visits google.com, parks on the live
+   map and mints tokens there. Chrome closes after 10 idle minutes.
+2. **Budget.** A token serves about 5 calls, and about 5 are minted a
+   minute, so one container makes about **25 Waze calls a minute**. Tokens
+   are not tied to an IP, but their score is better from an office or home
+   connection than from a cloud server.
+3. **Calls.** `waze/fetch.py` calls the live-map API with `curl_cffi`
+   (Chrome's TLS fingerprint) and the token; a refused token is swapped and
+   the call retried. `waze/parsers.py` turns the answers into the JSON
+   above.
+4. **Cache.** Answers are kept in memory: routes 5 minutes, jams and
+   alerts 2 minutes, places and addresses 12-24 hours. A rider adjusting the
+   same trip is answered from the cache in about 0.15 s.
+5. **Regions.** Waze has three clusters (`na`, `row`, `il`); Malaysia is
+   `row`, chosen from the coordinates.
+
+## The pool (16 containers)
+
+`pool_server.py` is the dispatcher in front of the containers; its rules are
+in `pool.py`:
+
+- Every query goes to container 01 until it has served **23 queries in the
+  last minute**; the next goes to 02, and so on. As the minute rolls on,
+  traffic falls back to 01.
+- When a container serves its **10th query of the minute**, the next one is
+  told to open Chrome (`POST /warm`), so it is ready before traffic reaches
+  it.
+- A container that fails (no answer, 5xx, refused key) rests 60 seconds and
+  the query moves on. Waze's own 400 / 404 answers are passed back.
+- Its `/health` (with the key) lists each container's load, rest and last
+  error.
+
+Capacity is about 16 × 23 ≈ 368 Waze calls a minute. The thresholds are
+`POOL_SWITCH_AT`, `POOL_WARM_AT` and `POOL_REST_SECONDS`.
+
+**Deploying on the office NAS:** see [`deploy/nas/README.md`](deploy/nas/README.md)
+(compose file, tunnel, `.env`, memory, the subdomain-worker pass-through and
+the Admin steps).
+
+## Running it on your own computer
+
+You need Python 3 and Google Chrome.
+
+```bash
 python -m pip install -r requirements.txt
 ```
 
-2️⃣ Start the API:
 ```bash
 python run.py
 ```
 
-3️⃣ Get your first data:
+Then, in another terminal:
+
 ```bash
-curl "http://localhost:8000/jams/search?location=40.758,-73.9855"
+curl "http://localhost:8000/routes/search?from=3.158,101.712&to=3.134,101.686&max_routes=1"
 ```
 
-```json
-{
-  "area": { "center": { "lat": 40.758, "lng": -73.9855 }, "region": "na" },
-  "count": 129,
-  "jams": [
-    {
-      "id": 145650922,
-      "street": "Lincoln Tunnel",
-      "city": "Manhattan, NY",
-      "severity": "standstill",
-      "length_meters": 1366,
-      "is_blocked": true,
-      "cause": { "type": "ROAD_CLOSED", "subtype": null, "description": null },
-      "updated_at": "2026-11-10T06:46:30Z"
-    },
-    {
-      "id": 145866286,
-      "street": "Metropolitan Ave",
-      "city": "Queens, NY",
-      "severity": "heavy",
-      "speed_kmh": 11.5,
-      "length_meters": 757,
-      "updated_at": "2026-11-10T06:46:29Z"
-    }
-  ]
-}
-```
+The first call opens a Chrome window and takes 20-40 seconds; leave the
+window open. `main.py` calls the same functions from Python without a
+server. `docker compose up --build` runs one container (Chrome and a virtual
+screen are in the image).
 
-All 6 endpoints are now live at `http://localhost:8000`.
+## Settings
 
-The first call opens a Google Chrome window: Waze only answers calls that carry a reCAPTCHA token from a real browser, and that window earns it. Leave it open. It closes by itself after 10 idle minutes. You need Google Chrome installed, and a home or office connection works best.
-
-## 📚 Endpoints
-
-6 endpoints cover everything you need.
-
-| Endpoint | Path | Returns |
+| Variable | Default | What it does |
 |---|---|---|
-| Live Traffic Jams | `/jams/search` | Every jam around a point: severity, speed, length, cause and path |
-| Road Closure Alerts | `/alerts/search` | Live road closures with street, location, reporter and time |
-| Driving Directions | `/routes/search` | Up to 3 routes: live ETA, distance, tolls and on-route jams |
-| Search Places | `/places/search` | Places, businesses and addresses with coordinates and a place ID |
-| Place Details | `/places/details` | Address, phone, opening hours, services and photos in one call |
-| Reverse Geocode | `/geocode/reverse` | Street, city and time zone for any coordinates |
+| `PORT` | `8000` | The port the API (or the dispatcher) listens on. |
+| `ROUTE_API_KEY` | none | When set, every call but `/health` needs it in `X-Route-Key`. Always set it when the API is reachable from outside the machine. |
+| `WAZE_PROXY` | none | A proxy for the calls to Waze (`http://user:pass@host:port`). Not needed: Waze limits tokens, not IPs. |
+| `POOL_SERVERS` | none | Dispatcher only: the containers, in order, comma-separated. |
+| `POOL_SWITCH_AT` / `POOL_WARM_AT` / `POOL_REST_SECONDS` | `23` / `10` / `60` | Dispatcher only: see "The pool". |
 
-## 🔍 Exploring Parameters
+Token limits, retries and cache times are constants in `config.py` and
+`waze/cache_config.py`.
 
-The same API is published on RapidAPI, and its playground is the easiest place to try parameters and see raw responses. Once a request looks right, run it locally for **unlimited free** data.
+## Tests
 
-1. [Subscribe to the free plan](https://rapidapi.com/OmkarCloud/api/best-waze-scraper-free-1000-calls/pricing) — 1,000 calls/month, no credit card.
-2. [Try the endpoints in the playground](https://rapidapi.com/OmkarCloud/api/best-waze-scraper-free-1000-calls/playground) — every param is pre-filled, so you see real data in one click.
-3. Copy the generated code and replace `https://best-waze-scraper-free-1000-calls.p.rapidapi.com` with `http://localhost:8000`. It will now run against your local API.
-
-```python
-import requests
-
-# generated by the playground, host swapped for the local API
-response = requests.get(
-    "http://localhost:8000/jams/search",
-    params={"location": "40.758,-73.9855"},
-)
-print(response.json())
+```bash
+python -m pytest -q waze test_pool.py
 ```
 
-## 💬 Have Questions? We Have Answers.
+The parser tests run against saved Waze answers in `waze/fixtures/`; the pool
+tests check the dispatcher's rules. Neither needs a network or Chrome.
 
-You're a developer — we know how hard completing a project can be. So we offer full support: just message us and we'll reply ✅ with a solution within 1 working day.
+## Things to know
 
-[![Message Us on WhatsApp about Waze Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/whatsapp-us.png)](https://www.omkar.cloud/l/waze-scraper-github-whatsapp)
+- **Waze's terms.** This reads Waze's private live-map API through an
+  automated browser, which Waze's terms very likely forbid. GET.ride keeps
+  the AI and OSRM after Waze in the fare order, so fares keep working if
+  Waze blocks it.
+- **It can break when Waze changes.** The reCAPTCHA site key, the API paths
+  and the answer shapes are taken from the live map's code as of November
+  2026.
+- **Tokens are the limit,** not bandwidth or the IP: each container makes
+  about 25 Waze calls a minute.
 
-[![Ask Us by Email about Waze Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/ask-on-email.png)](mailto:happy.to.help@omkar.cloud?subject=Help%20with%20Waze%20Scraper%20API&body=I%20need%20help%20using%20the%20Waze%20Scraper%20API.)
+## Files
 
-## ⚡ Popular Scrapers by Omkar Cloud
-
-- [**Google Maps Scraper (3,100+ GitHub Stars)**](https://github.com/omkarcloud/google-maps-scraper) — type "dentists in New York", get every business as a ready-to-call lead list: phones, emails, websites & reviews. Up to 100K free leads/month.
-- [**G2 Scraper**](https://www.omkar.cloud/tools/g2-scraper) — G2 product details, ratings & AI-found contacts
-- [**Website Email Contact Scraper**](https://www.omkar.cloud/tools/website-email-contact-scraper) — emails, phones & socials from any website
-- [**AliExpress Scraper**](https://www.omkar.cloud/tools/aliexpress-scraper-api) — live product details, SKU variants, stock & shipping
-- [**Booking Scraper**](https://www.omkar.cloud/tools/booking-scraper) — Booking.com hotels: prices, ratings, rooms & amenities
-- [**Etsy Scraper**](https://www.omkar.cloud/tools/etsy-scraper) — Etsy products: prices, discounts, shops & variations
-
-## ⭐ Love It? [Star It ⭐!](https://github.com/omkarcloud/waze-scraper)
-
-Star the repo ⭐ and become my star hero!
-
-It's just 1 click, but it means the world to me.
-
-[![Star us on GitHub](https://raw.githubusercontent.com/omkarcloud/google-maps-scraper/master/screenshots/star-us.png)](https://github.com/omkarcloud/waze-scraper)
+| File | Role |
+|---|---|
+| `run.py`, `routes.py` | The HTTP API (bottle + cheroot), the key check, `/health`, `/warm` |
+| `pool.py`, `pool_server.py` | The dispatcher's rules and server |
+| `waze/api.py` | The endpoints: areas, regions, cache, tiling of large boxes |
+| `waze/fetch.py` | Calls to Waze with tokens, retries, last-call status |
+| `waze/token.py`, `identity_pool.py` | The token pool |
+| `browser_client.py`, `patchright_driver.py` | Chrome: open, warm, mint |
+| `waze/parsers.py`, `waze/schemas.py`, `waze/refs.py` | Answers, parameters, ids and links |
+| `config.py`, `waze/cache_config.py` | Settings and cache times |
+| `deploy/nas/` | The office NAS deployment |
