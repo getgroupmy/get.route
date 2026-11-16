@@ -87,8 +87,14 @@ pinned at 100% means you are fine.
 
 ## Set it up
 
-1. Copy this repository's `GET.route` folder to the NAS, e.g.
-   `/volume1/docker/get-route`.
+1. Make a folder for the project on the NAS, e.g.
+   `/volume1/docker/get-route`. Either copy this repository's `GET.route`
+   folder there, or (as the office NAS does) let Docker build straight from
+   GitHub: put only the compose file there, saved as `compose.yaml`, with
+   every `build: ../..` line changed to
+   `build: https://github.com/getgroupmy/get.route.git#main:GET.route`.
+   Then the NAS needs no copy of the code, and a rebuild fetches the latest
+   `main`.
 2. In Cloudflare Zero Trust › Networks › Tunnels, create a tunnel
    (Docker). Copy the token. Add **one** public hostname:
    `route.getride.my` → `http://get-route-pool:8000`.
@@ -99,10 +105,10 @@ pinned at 100% means you are fine.
    `route` is in `PASS_THROUGH` in its `wrangler.toml`; if the repository
    variable `SUBDOMAIN_PROXY_PASS_THROUGH` is set, it replaces that list,
    so `route` must be in the variable too (e.g. `stats,route`).
-3. In `deploy/nas`, copy `.env.example` to `.env`; set `TUNNEL_TOKEN` and
-   `ROUTE_API_KEY` (`openssl rand -hex 32`).
-4. Start it: Container Manager › Project › Create, path `deploy/nas`, or
-   over SSH:
+3. Next to the compose file, copy `.env.example` to `.env`; set
+   `TUNNEL_TOKEN` and `ROUTE_API_KEY` (`openssl rand -hex 32`).
+4. Start it: Container Manager › Project › Create, with the folder from
+   step 1, or over SSH from that folder (`deploy/nas` in a copy):
 
    ```bash
    cd /volume1/docker/get-route/deploy/nas && sudo docker compose up -d --build
@@ -111,12 +117,44 @@ pinned at 100% means you are fine.
 5. Check it from anywhere: `https://route.getride.my/health` answers
    `{"status": "ok", "pool": 16}`. If it shows the GET.ride web page
    instead, the subdomain worker is still catching `route` (step 2).
-6. In GET.ride, **Admin › Settings › Fare AI provider**: set the fare
-   data order to **Waze, then AI, then OSRM**. On the Waze server card for
+6. In GET.ride, **Admin › Settings › Fare AI provider**: pick a fare data
+   order with Waze in it (e.g. **Waze, then Google Maps, then Apple Maps,
+   then AI, then OSRM**). On the Waze server card for
    `https://route.getride.my` (add one if there is none; leave its area on
    **All regions**), paste the `ROUTE_API_KEY`, switch it on, tap **Test**,
-   then **Save changes**. Fares the pool can't answer within 3 s go to the
-   AI, then OSRM.
+   then **Save changes**. Fares the pool can't answer within Waze's time
+   (2 s by default, **Time limits** on the same page) go to the next step.
 
 The first query opens Chrome in `get-route-01` (about 20–40 s); after that
 answers take about 1–3 s.
+
+## Update it
+
+With the build from GitHub (step 1), rebuild the dispatcher, or every
+container when the change is in the containers' code, from the project
+folder:
+
+```bash
+cd /volume1/docker/get-route && sudo docker compose up -d --build get-route-pool
+```
+
+```bash
+cd /volume1/docker/get-route && sudo docker compose up -d --build
+```
+
+With a copy, copy the new files in first (keep your `.env`). Then check the
+dispatcher picked it up:
+
+```bash
+sudo docker logs get-route-pool 2>&1 | tail -3
+```
+
+It starts with a line like `GET.route pool: 16 containers, next after 23/min,
+warm at 10, keeping 1 warm every 240 s`. To see Chrome in container 01, ask
+its own `/health` with the key (it is never printed):
+
+```bash
+sudo docker exec get-route-01 python -c "import urllib.request,os;r=urllib.request.Request('http://localhost:8000/health',headers={'X-Route-Key':os.environ['ROUTE_API_KEY']});print(urllib.request.urlopen(r).read().decode())"
+```
+
+`"chrome": "open"` is what keep-warm holds it at.
