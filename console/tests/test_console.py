@@ -107,6 +107,12 @@ def test_servers_order_can_change(env):
     assert [s["name"] for s in order] == ["NAS pool", "Mac mini"]
     key = {"X-Route-Key": add_app(c)["api_key"]}
     assert c.get(Q, headers=key).json()["server"] == "nas"
+    moves = lambda: [a for a in c.get("/admin/api/audit", headers=ADMIN).json() if a["action"] == "server.move"]
+    assert len(moves()) == 1
+    # Asking the first server to go earlier changes nothing and logs nothing.
+    order = c.post(f"/admin/api/backends/{nas['id']}/move?up=true", headers=ADMIN).json()
+    assert [s["name"] for s in order] == ["NAS pool", "Mac mini"]
+    assert len(moves()) == 1
 
 
 def test_the_servers_keys_are_encrypted_and_never_shown(env):
