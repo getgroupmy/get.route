@@ -1,8 +1,9 @@
 # GET.route on the office NAS (see README.md): a pool of 16 Waze route
-# containers behind one dispatcher, for all of Malaysia. GET.ride's Fare AI
-# lists only the dispatcher, as one Waze server:
+# containers behind one dispatcher, for all of Malaysia. Apps never call it
+# directly: the GET.route consoles (console/) ask the dispatcher, with its key:
 #
-#   route.getride.my -> http://get-route-pool:8000   needs X-Route-Key
+#   NAS console -> http://get-route-pool:8000            needs X-Route-Key
+#   Mac console -> http://NAS_IP:8100 (compose.override.yaml, see README.md)
 #
 # The dispatcher (pool_server.py) sends every query to container 01 until it
 # has served 23 in the last minute, then to 02, and so on; when a container
@@ -11,8 +12,8 @@
 # so usually only one or two use real memory. A container that fails is
 # skipped for 60 s and the query goes to the next.
 #
-# The containers have no hostname of their own: only the dispatcher is in
-# the Cloudflare Tunnel, so no port is opened on the NAS or the router.
+# The containers have no hostname of their own and no port is opened on the
+# router; the Cloudflare Tunnel only carries the console (waze2.getcdn.link).
 x-get-route: &get-route
   build: ../..
   platform: linux/amd64

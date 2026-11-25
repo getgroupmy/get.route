@@ -2,15 +2,18 @@
 
 GET.route answers GET.ride's Fare AI with Waze's live route: real distance,
 traffic-aware time and tolls. On the NAS it runs as **a pool of 16 Waze
-containers behind one dispatcher**, for all of Malaysia. The GET.route
-console (`../../../console`), on the same NAS, sees it as one Waze server;
-apps only ever call the console.
+containers behind one dispatcher**, for all of Malaysia. Apps only ever
+call the GET.route consoles (`../../../console`), which see the pool as one
+Waze server: the console on this NAS (`waze2.getcdn.link`) asks it first, and
+the console on the Mac mini (`waze.getcdn.link`) asks it second, over the
+office network.
 
 ```
- apps ──https──► waze.getcdn.link ─ Tunnel ─► get-route-console ──► get-route-pool ──► get-route-01  (Chrome + API)
-     X-Route-Key               (cloudflared)    (console)         (dispatcher)  ├─► get-route-02
-     (app's key)                                     │                          ├─► …
-                                                     └─► Mac mini (first)       └─► get-route-16
+ waze2.getcdn.link ─ Tunnel ─► get-route-console ──► get-route-pool ──► get-route-01  (Chrome + API)
+ (the NAS's console)          (console, NAS)      (dispatcher)  ├─► get-route-02
+                                                       ▲        ├─► …
+ waze.getcdn.link ─► console on the Mac ──────────────┘        └─► get-route-16
+                     (http://NAS_IP:8100, office network)
 ```
 
 ## How the pool shares the work
@@ -50,7 +53,7 @@ the first spill-over queries wait for it (up to about a minute). Lower
 **Monitoring.** GET.ride checks the dispatcher every minute. Fare AI admins
 get a push when the pool has failed queries for 5 minutes (every container
 busy or failing, or the NAS / tunnel down) and when it serves again; it
-watches `https://waze.getcdn.link/health`. The console checks the pool every
+watches `https://waze.getcdn.link/health` and `https://waze2.getcdn.link/health`. Each console checks the pool every
 minute too (its **Servers** and **Overview** tabs). A single broken container
 is skipped without an alert; see it in the pool's own `/health`, on the NAS
 (`containers`: each one's load, rest and last error; the key is never
@@ -62,10 +65,12 @@ sudo docker exec get-route-pool python -c "import urllib.request,os;r=urllib.req
 
 ## Security
 
-- **No port is opened** on the NAS or the router: `cloudflared` makes an
-  outgoing connection and Cloudflare sends `waze.getcdn.link` down it to the
-  console. The pool and its containers have no public hostname; only the
-  console reaches them, inside the Docker network.
+- **No port is opened** on the router: `cloudflared` makes an outgoing
+  connection and Cloudflare sends `waze2.getcdn.link` down it to the
+  console. The pool and its containers have no public hostname. The NAS's
+  console reaches the pool inside the Docker network; the Mac's console
+  reaches it on the office network at port 8100 (`compose.override.yaml`,
+  step 6), which still needs the key.
 - Every call except `/health` needs the secret header `X-Route-Key`. The
   dispatcher and all containers share the one `ROUTE_API_KEY`, which only
   the console holds; each app has its own key from the console.
@@ -102,7 +107,7 @@ pinned at 100% means you are fine.
    `main`.
 2. In Cloudflare Zero Trust › Networks › Tunnels, create a tunnel
    (Docker) and copy the token. Its public hostname is the console's,
-   `waze.getcdn.link` → `http://get-route-console:8080`, added when you set
+   `waze2.getcdn.link` → `http://get-route-console:8080`, added when you set
    up the console (`console/README.md`). The pool itself gets no public
    hostname.
 3. Next to the compose file, copy `.env.example` to `.env`; set
@@ -116,15 +121,24 @@ pinned at 100% means you are fine.
 
 5. Check it on the NAS: `sudo docker logs get-route-pool 2>&1 | tail -3`
    starts with `GET.route pool: 16 containers, …`.
-6. Set up the console (`console/README.md`) on the same NAS and add the pool
-   in its **Servers** tab: `http://get-route-pool:8000` with this
-   `ROUTE_API_KEY`, then **Test**.
-7. In GET.ride, **Admin › Settings › Fare AI provider**: pick a fare data
+6. Let the Mac's console reach the pool on the office network (port 8100),
+   from the project folder:
+
+   ```bash
+   printf 'services:\n  get-route-pool:\n    ports:\n      - "8100:8000"\n' | sudo tee compose.override.yaml > /dev/null && sudo docker compose up -d get-route-pool
+   ```
+
+7. Set up the consoles (`console/README.md` on this NAS,
+   `console/deploy/mac/README.md` on the Mac) and add the pool in each one's
+   **Servers** tab: `http://get-route-pool:8000` on the NAS's,
+   `http://NAS_IP:8100` on the Mac's, with this `ROUTE_API_KEY`, then **Test**.
+8. In GET.ride, **Admin › Settings › Fare AI provider**: pick a fare data
    order with Waze in it (e.g. **Waze, then Google Maps, then Apple Maps,
-   then AI, then OSRM**). Its one Waze server is `https://waze.getcdn.link`
-   with GET.ride's key from the console's **Apps** tab; tap **Test**, then
-   **Save changes**. Fares the console can't answer within Waze's time
-   (3 s, **Time limits** on the same page) go to the next step.
+   then AI, then OSRM**). Its Waze servers are `https://waze.getcdn.link`
+   (the Mac's console) then `https://waze2.getcdn.link` (this NAS's), each
+   with GET.ride's key from that console's **Apps** tab; tap **Test**, then
+   **Save changes**. Fares Waze can't answer within its time (3 s, **Time
+   limits** on the same page) go to the next step.
 
 The first query opens Chrome in `get-route-01` (about 20–40 s); after that
 answers take about 1–3 s.

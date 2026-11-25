@@ -1,12 +1,15 @@
 # GET.route on a Mac mini (Apple chip), with the NAS as the fallback
 
 The Mac mini answers Waze lookups first; the NAS pool (`../nas`) stays as it
-is and answers when the Mac doesn't. The GET.route console
-(`console/`, `waze.getcdn.link`) on the NAS asks them in that order:
+is and answers when the Mac doesn't. Two GET.route consoles (`console/`) ask
+them: the one on this Mac (`waze.getcdn.link`, `console/deploy/mac`) asks the
+Mac first, and the one on the NAS (`waze2.getcdn.link`) asks the NAS first.
+GET.ride lists both consoles as Waze servers, the Mac's first:
 
 ```
- GET.ride ──X-Route-Key──► waze.getcdn.link ──┬─► Mac mini: pool (http://MAC_IP:8100) ─► workers 8101…8104 (Chrome)
- (and other apps)        (console, on the NAS) └─► NAS: get-route-pool ─► get-route-01…16 (fallback)
+ GET.ride ─► waze.getcdn.link  (console, Mac) ──┬─► Mac mini: pool (http://127.0.0.1:8100) ─► workers 8101…8104 (Chrome)
+          └► waze2.getcdn.link (console, NAS) ──┼─► NAS: get-route-pool ─► get-route-01…16
+                                                └─ each console asks the other machine's pool second
 ```
 
 **Why not Docker on the Mac?** The Waze image is Intel-only (it ships Google
@@ -15,8 +18,8 @@ Intel emulation: slow, and Chrome under emulation crashes. On macOS itself
 GET.route uses the Mac's own Google Chrome in a real window, which is
 faster and is what Waze scores best.
 
-**How the fallback works.** For each call the console asks the Mac first,
-within the Mac's time (3 s by default, set on its card in the console). A
+**How the fallback works.** For each call the Mac's console asks the Mac
+first, within the Mac's time (2 s, set on its card in the console). A
 server that doesn't answer, or answers with a failure, rests (60 s by
 default); while the Mac rests, calls go straight to the NAS, and the Mac is
 asked again when its rest ends. The console checks both every minute, and
@@ -100,21 +103,19 @@ cover that case.
    launchctl load -w ~/Library/LaunchAgents/com.getride.getroute.plist
    ```
 
-6. Reach it from the GET.route console (`console/`, `waze.getcdn.link`) on
-   the NAS. Keep `POOL_HOST=0.0.0.0` in `.env` so the dispatcher answers on
-   the office network (the workers stay on this Mac only), and give the Mac a
-   fixed address on the office router (a DHCP reservation). In the console,
-   **Servers › Add a server**: `http://MAC_IP:8100` with this Mac's
-   `ROUTE_API_KEY`, then **Ask earlier** until it is above the NAS pool, and
-   **Test**.
+6. Reach it from the NAS's console too. Keep `POOL_HOST=0.0.0.0` in `.env`
+   so the dispatcher answers on the office network (the workers stay on this
+   Mac only), and give the Mac a fixed address there (`192.168.0.101` on the
+   office one). In the NAS's console (`waze2.getcdn.link/admin`), **Servers ›
+   Add a server**: `http://192.168.0.101:8100` with this Mac's
+   `ROUTE_API_KEY`, below the NAS pool, and **Test**.
 
    macOS's firewall, if it is on, asks once whether Python may accept
    incoming connections: Allow.
 
-7. Your apps then call the console, not this Mac: in GET.ride, **Admin ›
-   Settings › Fare AI provider › Waze servers** has one server,
-   `https://waze.getcdn.link`, with GET.ride's key from the console's
-   **Apps** tab.
+7. Set up the console on this Mac (`console/deploy/mac/README.md`): it asks
+   this pool at `http://127.0.0.1:8100` first and the NAS pool second, and is
+   `waze.getcdn.link`, GET.ride's first Waze server.
 
 ## Check and update
 
