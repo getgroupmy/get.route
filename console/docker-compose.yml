@@ -1,0 +1,34 @@
+# GET.route console on the office NAS (see README.md): one small container in
+# front of the Waze servers, reached through GET.route's Cloudflare Tunnel:
+#
+#   waze.getcdn.link -> http://get-route-console:8080
+#
+# It joins GET.route's Docker network, so the NAS pool is http://get-route-pool:8000
+# and that tunnel reaches the console by name. The Mac mini is reached on the
+# office network (http://MAC_IP:8100).
+name: get-route-console
+
+services:
+  get-route-console:
+    build: .
+    image: get-route-console:1
+    container_name: get-route-console
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WZ_DATA_DIR: /data
+    volumes:
+      - ${WZ_DATA_PATH:?Set WZ_DATA_PATH in .env}:/data
+    # The console on the NAS itself only (http://127.0.0.1:8088/admin over SSH
+    # or the NAS's own browser); everyone else comes through the tunnel.
+    ports:
+      - "127.0.0.1:8088:8080"
+    networks:
+      - default
+      - get-route
+    mem_limit: 256m
+
+networks:
+  get-route:
+    external: true
+    name: ${GET_ROUTE_NETWORK:?Set GET_ROUTE_NETWORK in .env (GET.route's Docker network name)}

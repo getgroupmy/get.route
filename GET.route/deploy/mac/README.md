@@ -1,13 +1,12 @@
 # GET.route on a Mac mini (Apple chip), with the NAS as the fallback
 
-The Mac mini answers GET.ride's Waze lookups first; the NAS pool
-(`../nas`) stays as it is and answers when the Mac doesn't. GET.ride lists
-both as Waze servers, the Mac first:
+The Mac mini answers Waze lookups first; the NAS pool (`../nas`) stays as it
+is and answers when the Mac doesn't. The GET.route console
+(`console/`, `waze.getcdn.link`) on the NAS asks them in that order:
 
 ```
-                                 ┌─► route-mac.getride.my ─ Tunnel ─► Mac mini: pool (8100) ─► workers 8101…8104 (Chrome)
- ai-route-proxy ──X-Route-Key──┤
- (GET.ride)                      └─► route.getride.my ───── Tunnel ─► NAS: get-route-pool ─► get-route-01…16 (fallback)
+ GET.ride ──X-Route-Key──► waze.getcdn.link ──┬─► Mac mini: pool (http://MAC_IP:8100) ─► workers 8101…8104 (Chrome)
+ (and other apps)        (console, on the NAS) └─► NAS: get-route-pool ─► get-route-01…16 (fallback)
 ```
 
 **Why not Docker on the Mac?** The Waze image is Intel-only (it ships Google
@@ -16,12 +15,12 @@ Intel emulation: slow, and Chrome under emulation crashes. On macOS itself
 GET.route uses the Mac's own Google Chrome in a real window, which is
 faster and is what Waze scores best.
 
-**How the fallback works.** For each fare GET.ride asks the Mac first, within
-Waze's time (Admin › Fare AI provider › Time limits, 3 s). A server that
-fails rests for the retry time set on the same page; while the Mac rests,
-fares go straight to the NAS, and the Mac is asked again when its rest ends.
-The minute-by-minute health check watches both and tells Fare AI admins when
-one has been offline for 5 minutes.
+**How the fallback works.** For each call the console asks the Mac first,
+within the Mac's time (3 s by default, set on its card in the console). A
+server that doesn't answer, or answers with a failure, rests (60 s by
+default); while the Mac rests, calls go straight to the NAS, and the Mac is
+asked again when its rest ends. The console checks both every minute, and
+GET.ride's own health check watches the console.
 
 **What the fallback does not cover.** The Mac and the NAS share the office's
 Unifi line and its one fixed IP address. If Waze ever refuses that address,
@@ -101,31 +100,33 @@ cover that case.
    launchctl load -w ~/Library/LaunchAgents/com.getride.getroute.plist
    ```
 
-6. The tunnel: in Cloudflare Zero Trust › Networks › Tunnels, create a new
-   tunnel (macOS) for the Mac and copy its token. Add one public hostname:
-   `route-mac.getride.my` → `http://localhost:8100`. Then on the Mac:
+6. Reach it from the GET.route console (`console/`, `waze.getcdn.link`) on
+   the NAS. Keep `POOL_HOST=0.0.0.0` in `.env` so the dispatcher answers on
+   the office network (the workers stay on this Mac only), and give the Mac a
+   fixed address on the office router (a DHCP reservation). In the console,
+   **Servers › Add a server**: `http://MAC_IP:8100` with this Mac's
+   `ROUTE_API_KEY`, then **Ask earlier** until it is above the NAS pool, and
+   **Test**.
 
-   ```bash
-   brew install cloudflared
-   ```
+   macOS's firewall, if it is on, asks once whether Python may accept
+   incoming connections: Allow.
 
-   ```bash
-   sudo cloudflared service install PASTE_THE_TUNNEL_TOKEN
-   ```
+7. Your apps then call the console, not this Mac: in GET.ride, **Admin ›
+   Settings › Fare AI provider › Waze servers** has one server,
+   `https://waze.getcdn.link`, with GET.ride's key from the console's
+   **Apps** tab.
 
-   It runs as a system service, starts on boot and needs no login.
+### Without the console (its own tunnel)
 
-   GET.ride's subdomain worker answers every `*.getride.my` name with the
-   web app unless the name is in its pass-through list, so `route-mac` must
-   be there too: in `wrangler.toml` (getgroupmy/get-ride) and, when it is
-   set, in the repository variable `SUBDOMAIN_PROXY_PASS_THROUGH`, then the
-   worker deployed. Until then `https://route-mac.getride.my/health` shows the
-   web page instead of `{"status": "ok", "pool": 4}`.
-
-7. In GET.ride, **Admin › Settings › Fare AI provider › Waze servers**: add
-   a server `https://route-mac.getride.my` with the Mac's key and tap
-   **Test**. Servers are asked in order, so tap its **Ask earlier** arrow
-   until it is above the NAS's `https://route.getride.my`. **Save changes.**
+To reach this Mac straight from GET.ride instead, set `POOL_HOST=127.0.0.1`
+and give it its own Cloudflare Tunnel (macOS): public hostname
+`route-mac.getride.my` → `http://localhost:8100`, then
+`brew install cloudflared` and `sudo cloudflared service install TOKEN`.
+`route-mac` is already in GET.ride's subdomain-worker pass-through list
+(`wrangler.toml`); if the repository variable
+`SUBDOMAIN_PROXY_PASS_THROUGH` is set, add it there too and redeploy the
+worker. Then add `https://route-mac.getride.my` as a Waze server in GET.ride,
+above `https://route.getride.my`.
 
 ## Check and update
 
