@@ -114,6 +114,11 @@ Capacity is about 16 × 23 ≈ 368 Waze calls a minute. The thresholds are
 (compose file, tunnel, `.env`, memory, the subdomain-worker pass-through and
 the Admin steps).
 
+**On a Mac mini (Apple chip), with the NAS as the fallback:** see
+[`deploy/mac/README.md`](deploy/mac/README.md). It runs directly on macOS
+(the Docker image is Intel-only) with the Mac's own Chrome, as
+`route-mac.getride.my`, listed above the NAS in Admin.
+
 ## Running it on your own computer
 
 You need Python 3 and Google Chrome.
@@ -142,6 +147,7 @@ screen are in the image).
 | Variable | Default | What it does |
 |---|---|---|
 | `PORT` | `8000` | The port the API (or the dispatcher) listens on. |
+| `HOST` | `0.0.0.0` | The address it listens on; `127.0.0.1` keeps it to this machine (the Mac set-up uses that). |
 | `ROUTE_API_KEY` | none | When set, every call but `/health` needs it in `X-Route-Key`. Always set it when the API is reachable from outside the machine. |
 | `WAZE_PROXY` | none | A proxy for the calls to Waze (`http://user:pass@host:port`). Not needed: Waze limits tokens, not IPs. |
 | `POOL_SERVERS` | none | Dispatcher only: the containers, in order, comma-separated. |
