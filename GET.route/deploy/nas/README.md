@@ -2,14 +2,15 @@
 
 GET.route answers GET.ride's Fare AI with Waze's live route: real distance,
 traffic-aware time and tolls. On the NAS it runs as **a pool of 16 Waze
-containers behind one dispatcher**, for all of Malaysia. GET.ride sees a
-single Waze server.
+containers behind one dispatcher**, for all of Malaysia. The GET.route
+console (`../../../console`), on the same NAS, sees it as one Waze server;
+apps only ever call the console.
 
 ```
- ai-route-proxy ──https──► route.getride.my ─ Tunnel ─► get-route-pool ──► get-route-01  (Chrome + API)
- (Supabase)      X-Route-Key              (cloudflared)  (dispatcher)  ├─► get-route-02
-                                                                       ├─► …
-                                                                       └─► get-route-16
+ apps ──https──► waze.getcdn.link ─ Tunnel ─► get-route-console ──► get-route-pool ──► get-route-01  (Chrome + API)
+     X-Route-Key               (cloudflared)    (console)         (dispatcher)  ├─► get-route-02
+     (app's key)                                     │                          ├─► …
+                                                     └─► Mac mini (first)       └─► get-route-16
 ```
 
 ## How the pool shares the work
@@ -48,22 +49,26 @@ the first spill-over queries wait for it (up to about a minute). Lower
 
 **Monitoring.** GET.ride checks the dispatcher every minute. Fare AI admins
 get a push when the pool has failed queries for 5 minutes (every container
-busy or failing, or the NAS / tunnel down) and when it serves again. A
-single broken container is skipped without an alert; see it in
-`https://route.getride.my/health` with the key (`containers`: each one's
-load, rest and last error):
+busy or failing, or the NAS / tunnel down) and when it serves again; it
+watches `https://waze.getcdn.link/health`. The console checks the pool every
+minute too (its **Servers** and **Overview** tabs). A single broken container
+is skipped without an alert; see it in the pool's own `/health`, on the NAS
+(`containers`: each one's load, rest and last error; the key is never
+printed):
 
 ```bash
-curl -s -H "X-Route-Key: $ROUTE_API_KEY" https://route.getride.my/health
+sudo docker exec get-route-pool python -c "import urllib.request,os;r=urllib.request.Request('http://localhost:8000/health',headers={'X-Route-Key':os.environ['ROUTE_API_KEY']});print(urllib.request.urlopen(r).read().decode())"
 ```
 
 ## Security
 
 - **No port is opened** on the NAS or the router: `cloudflared` makes an
-  outgoing connection and Cloudflare sends `route.getride.my` down it. Only
-  the dispatcher is in the tunnel; the containers have no hostname.
+  outgoing connection and Cloudflare sends `waze.getcdn.link` down it to the
+  console. The pool and its containers have no public hostname; only the
+  console reaches them, inside the Docker network.
 - Every call except `/health` needs the secret header `X-Route-Key`. The
-  dispatcher and all containers share the one key.
+  dispatcher and all containers share the one `ROUTE_API_KEY`, which only
+  the console holds; each app has its own key from the console.
 - Chrome runs inside the containers on the office connection. Waze scores
   the tokens it makes; an office or home connection scores far better than
   a cloud server, which is why this runs here.
@@ -73,7 +78,7 @@ curl -s -H "X-Route-Key: $ROUTE_API_KEY" https://route.getride.my/health
 - Synology DSM 7.2+ with **Container Manager**, x86-64 (the Chrome image
   is amd64 only).
 - 3 GB of disk for the image, which every container shares.
-- A Cloudflare account with the `getride.my` zone.
+- A Cloudflare account with the `getcdn.link` zone.
 
 ### Memory and CPU
 
@@ -96,15 +101,10 @@ pinned at 100% means you are fine.
    Then the NAS needs no copy of the code, and a rebuild fetches the latest
    `main`.
 2. In Cloudflare Zero Trust › Networks › Tunnels, create a tunnel
-   (Docker). Copy the token. Add **one** public hostname:
-   `route.getride.my` → `http://get-route-pool:8000`.
-
-   GET.ride's subdomain worker (`cloudflare/subdomain-proxy` in
-   getgroupmy/get-ride) answers every `*.getride.my` name with the web app,
-   tunnel hostnames included, unless the name is in its pass-through list.
-   `route` is in `PASS_THROUGH` in its `wrangler.toml`; if the repository
-   variable `SUBDOMAIN_PROXY_PASS_THROUGH` is set, it replaces that list,
-   so `route` must be in the variable too (e.g. `stats,route`).
+   (Docker) and copy the token. Its public hostname is the console's,
+   `waze.getcdn.link` → `http://get-route-console:8080`, added when you set
+   up the console (`console/README.md`). The pool itself gets no public
+   hostname.
 3. Next to the compose file, copy `.env.example` to `.env`; set
    `TUNNEL_TOKEN` and `ROUTE_API_KEY` (`openssl rand -hex 32`).
 4. Start it: Container Manager › Project › Create, with the folder from
@@ -114,16 +114,17 @@ pinned at 100% means you are fine.
    cd /volume1/docker/get-route/deploy/nas && sudo docker compose up -d --build
    ```
 
-5. Check it from anywhere: `https://route.getride.my/health` answers
-   `{"status": "ok", "pool": 16}`. If it shows the GET.ride web page
-   instead, the subdomain worker is still catching `route` (step 2).
-6. In GET.ride, **Admin › Settings › Fare AI provider**: pick a fare data
+5. Check it on the NAS: `sudo docker logs get-route-pool 2>&1 | tail -3`
+   starts with `GET.route pool: 16 containers, …`.
+6. Set up the console (`console/README.md`) on the same NAS and add the pool
+   in its **Servers** tab: `http://get-route-pool:8000` with this
+   `ROUTE_API_KEY`, then **Test**.
+7. In GET.ride, **Admin › Settings › Fare AI provider**: pick a fare data
    order with Waze in it (e.g. **Waze, then Google Maps, then Apple Maps,
-   then AI, then OSRM**). On the Waze server card for
-   `https://route.getride.my` (add one if there is none; leave its area on
-   **All regions**), paste the `ROUTE_API_KEY`, switch it on, tap **Test**,
-   then **Save changes**. Fares the pool can't answer within Waze's time
-   (2 s by default, **Time limits** on the same page) go to the next step.
+   then AI, then OSRM**). Its one Waze server is `https://waze.getcdn.link`
+   with GET.ride's key from the console's **Apps** tab; tap **Test**, then
+   **Save changes**. Fares the console can't answer within Waze's time
+   (3 s, **Time limits** on the same page) go to the next step.
 
 The first query opens Chrome in `get-route-01` (about 20–40 s); after that
 answers take about 1–3 s.
