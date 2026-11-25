@@ -17,6 +17,7 @@ the next one warmed at the 10th).
     POOL_KEEP_WARM_SECONDS how often they are asked (240; under the
                      containers' 600 idle seconds, so Chrome never closes)
     PORT             port to listen on (8000)
+    HOST             address to listen on (0.0.0.0; 127.0.0.1 = this machine only)
 
 A query a container could not serve (no answer, 5xx, refused key) is tried
 on the next one; Waze's own 400 / 404 answers are passed back as they are.
@@ -171,7 +172,7 @@ def main():
           f"listening on :{port}", flush=True)
     if KEEP_WARM:
         threading.Thread(target=_keep_warm_loop, daemon=True, name="pool-keep-warm").start()
-    server = wsgi.Server(("0.0.0.0", port), app, server_name="get-route-pool", numthreads=32)
+    server = wsgi.Server((os.environ.get("HOST") or "0.0.0.0", port), app, server_name="get-route-pool", numthreads=32)
     try:
         server.start()
     except KeyboardInterrupt:
