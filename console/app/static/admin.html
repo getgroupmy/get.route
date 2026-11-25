@@ -238,6 +238,7 @@ function show(authed) {
 function open(tab) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("hide", t.id !== "tab-" + tab));
+  lastAuto[tab] = Date.now();
   ({ overview: loadOverview, log: loadLog, clients: loadClients, servers: loadServers, settings: loadSettings, admins: loadAdmins, audit: loadAudit }[tab] || (() => {}))();
 }
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => open(b.dataset.tab));
@@ -313,7 +314,7 @@ async function loadServers() {
     h("td", { class: "key wrap" }, s.url), h("td", {}, ms(s.timeout_ms)), h("td", {}, s.rest_seconds + " s"),
     h("td", {}, healthPill(s.health), s.resting_seconds ? h("div", { class: "mute" }, `resting ${s.resting_seconds} s`) : "", h("div", { class: "mute wrap" }, s.health_detail || s.last_error || "")),
     h("td", { class: "acts" },
-      test ? h("button", { class: "btn", onclick: async ev => { ev.target.disabled = true; $("sTest").textContent = `Testing ${s.name} (a cold server takes 20–40 s)…`; $("sTest").classList.remove("hide"); try { const t = await api(`/backends/${s.id}/test`, { method: "POST" }); $("sTest").textContent = `${s.name}: health ${t.health}${t.health_detail ? " (" + t.health_detail + ")" : ""}; route ${t.route.status ?? "no answer"} in ${ms(t.route.latency_ms)}: ${t.route.summary}`; } catch (e) { $("sTest").textContent = e.message; } ev.target.disabled = false; loadServers(); } }, "Test") : "",
+      test ? h("button", { class: "btn", onclick: async ev => { busy++; ev.target.disabled = true; $("sTest").textContent = `Testing ${s.name} (a cold server takes 20–40 s)…`; $("sTest").classList.remove("hide"); try { const t = await api(`/backends/${s.id}/test`, { method: "POST" }); $("sTest").textContent = `${s.name}: health ${t.health}${t.health_detail ? " (" + t.health_detail + ")" : ""}; route ${t.route.status ?? "no answer"} in ${ms(t.route.latency_ms)}: ${t.route.summary}`; } catch (e) { $("sTest").textContent = e.message; } busy--; ev.target.disabled = false; loadServers(); } }, "Test") : "",
       manage ? [
         h("button", { class: "btn", disabled: i === 0 ? "" : null, onclick: async () => { await api(`/backends/${s.id}/move?up=true`, { method: "POST" }); loadServers(); } }, "Ask earlier"),
         s.resting_seconds ? h("button", { class: "btn", onclick: async () => { await api(`/backends/${s.id}/wake`, { method: "POST" }); loadServers(); } }, "End rest") : null,
@@ -382,7 +383,24 @@ $("useToken").onclick = () => { $("tokenForm").classList.remove("hide"); $("pwFo
 $("tokenBtn").onclick = async () => { token = $("token").value.trim(); sessionStorage.setItem("wzToken", token); $("token").value = ""; await refreshMe(); if (!me.signed_in) { $("loginErr").textContent = "That token is not right."; $("pwForm").classList.remove("hide"); $("tokenForm").classList.add("hide"); } };
 $("token").addEventListener("keydown", e => e.key === "Enter" && $("tokenBtn").click());
 $("logout").onclick = async () => { token = ""; sessionStorage.removeItem("wzToken"); await fetch("/admin/session/logout", { method: "POST" }); refreshMe(); };
-setInterval(() => { if (me && me.signed_in && !$("tab-overview").classList.contains("hide")) loadOverview().catch(() => {}); }, 30000);
+// The open tab keeps itself up to date: Servers and Request log every 15 s,
+// Overview every 30 s. It waits while a Test runs, while you type in a box, and
+// while the browser tab is in the background (and catches up when it is back).
+let busy = 0;
+const AUTO = { servers: [() => loadServers(), 15000], log: [() => loadLog(), 15000], overview: [() => loadOverview(), 30000] };
+let lastAuto = {};
+function autoUpdate() {
+  if (!me || !me.signed_in || document.hidden || busy) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === "TEXTAREA" || a.tagName === "SELECT" || (a.tagName === "INPUT" && a.type !== "checkbox"))) return;
+  for (const [tab, [load, every]] of Object.entries(AUTO)) {
+    if ($("tab-" + tab).classList.contains("hide") || Date.now() - (lastAuto[tab] || 0) < every) continue;
+    lastAuto[tab] = Date.now();
+    load().catch(() => {});
+  }
+}
+setInterval(autoUpdate, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastAuto = {}; autoUpdate(); } });
 refreshMe();
 </script>
 </body>
