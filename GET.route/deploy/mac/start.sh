@@ -35,7 +35,9 @@ for i in $(seq 1 "$WORKERS"); do
   (cd "$APP" && PORT="$port" keep_running "worker-$(printf %02d "$i")" "$PY" run.py) &
 done
 sleep 2
-(cd "$APP" && PORT="$POOL_PORT" POOL_SERVERS="$servers" keep_running pool "$PY" pool_server.py) &
+# The dispatcher listens on POOL_HOST: 127.0.0.1 (this Mac only, behind its own
+# tunnel) or 0.0.0.0 (also the office network, for the GET.route console on the NAS).
+(cd "$APP" && HOST="${POOL_HOST:-127.0.0.1}" PORT="$POOL_PORT" POOL_SERVERS="$servers" keep_running pool "$PY" pool_server.py) &
 
 trap 'kill 0' EXIT TERM INT
 wait
