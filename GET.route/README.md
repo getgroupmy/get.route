@@ -5,17 +5,19 @@ the drive time in current traffic, and the tolls on the way. It reads the same
 JSON API the Waze live map (waze.com/live-map) uses, through a real Google
 Chrome that earns the reCAPTCHA token Waze asks for.
 
-In production it runs on the office NAS as a pool of 16 containers behind one
-dispatcher, reached through a Cloudflare Tunnel at `https://route.getride.my`.
-GET.ride's `ai-route-proxy` asks it as the **Waze** step of the fare data
+In production it runs as Waze servers in the office: a Mac mini first
+(`deploy/mac`) and a pool of 16 containers on the NAS behind it
+(`deploy/nas`). Apps never call them directly: they call the GET.route
+console at `https://waze.getcdn.link` (`../console`) with their own key, and
+the console asks the servers in order. GET.ride's `ai-route-proxy` asks it as the **Waze** step of the fare data
 order (Admin › Settings › Fare AI provider), usually first: **Waze, then
 Google Maps, then Apple Maps, then AI, then OSRM**. The Waze / Google Maps /
 Apple Maps balance can send a share of fares to Google Maps or Apple Maps
 first; Waze takes the rest.
 
 ```
- rider app ──► ai-route-proxy ──https──► route.getride.my ──► Cloudflare Tunnel ──► get-route-pool ──► get-route-01 … 16
- (GET.ride)    (Supabase)      X-Route-Key                                          (pool_server.py)    (run.py + Chrome)
+ rider app ──► ai-route-proxy ──https──► waze.getcdn.link ─┬─► Mac mini: pool ─► workers (run.py + Chrome)
+ (GET.ride)    (Supabase)      X-Route-Key   (console, NAS)  └─► NAS: get-route-pool ─► get-route-01 … 16
 ```
 
 Based on [omkarcloud/waze-scraper](https://github.com/omkarcloud/waze-scraper)
@@ -26,7 +28,7 @@ Based on [omkarcloud/waze-scraper](https://github.com/omkarcloud/waze-scraper)
 - **`/routes/search`** for every fare: GET.ride asks for one route
   (`max_routes=1`) per leg and adds up the legs of a trip with stops. It
   reads the distance, the drive time and the toll price. Waze gets
-  **2 seconds** per trip by default (every leg included), then the fare
+  **3 seconds** per trip (every leg included), then the fare
   goes to the next step. Admins set it, and every other step's time, in
   **Admin › Fare AI provider › Time limits**, along with how long the rider
   app waits in all (7 s).
@@ -58,11 +60,12 @@ A bad or unknown parameter is a `400` that names it; no route between two
 points (or a trip over 3,000 miles) is a `400` with Waze's reason; an
 unknown place is a `404`; Waze failing after its retries is a `500`.
 
-Example, KLCC to KL Sentral:
+The console answers the same paths with the same answers. Example, KLCC to
+KL Sentral, with an app's key from the console:
 
 ```bash
-curl -H "X-Route-Key: $ROUTE_API_KEY" \
-  "https://route.getride.my/routes/search?from=3.158,101.712&to=3.134,101.686&max_routes=1"
+curl -H "X-Route-Key: $APP_KEY" \
+  "https://waze.getcdn.link/routes/search?from=3.158,101.712&to=3.134,101.686&max_routes=1"
 ```
 
 ## How it works
@@ -111,13 +114,14 @@ Capacity is about 16 × 23 ≈ 368 Waze calls a minute. The thresholds are
 `POOL_SWITCH_AT`, `POOL_WARM_AT`, `POOL_REST_SECONDS` and `POOL_KEEP_WARM`.
 
 **Deploying on the office NAS:** see [`deploy/nas/README.md`](deploy/nas/README.md)
-(compose file, tunnel, `.env`, memory, the subdomain-worker pass-through and
-the Admin steps).
+(compose file, tunnel, `.env`, memory, checks and updates).
 
 **On a Mac mini (Apple chip), with the NAS as the fallback:** see
 [`deploy/mac/README.md`](deploy/mac/README.md). It runs directly on macOS
-(the Docker image is Intel-only) with the Mac's own Chrome, as
-`route-mac.getride.my`, listed above the NAS in Admin.
+(the Docker image is Intel-only) with the Mac's own Chrome, and is listed
+above the NAS pool in the console's **Servers**.
+
+**The console (`waze.getcdn.link`):** see [`../console/README.md`](../console/README.md).
 
 ## Running it on your own computer
 

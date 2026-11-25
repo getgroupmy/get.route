@@ -116,18 +116,6 @@ cover that case.
    `https://waze.getcdn.link`, with GET.ride's key from the console's
    **Apps** tab.
 
-### Without the console (its own tunnel)
-
-To reach this Mac straight from GET.ride instead, set `POOL_HOST=127.0.0.1`
-and give it its own Cloudflare Tunnel (macOS): public hostname
-`route-mac.getride.my` → `http://localhost:8100`, then
-`brew install cloudflared` and `sudo cloudflared service install TOKEN`.
-`route-mac` is already in GET.ride's subdomain-worker pass-through list
-(`wrangler.toml`); if the repository variable
-`SUBDOMAIN_PROXY_PASS_THROUGH` is set, add it there too and redeploy the
-worker. Then add `https://route-mac.getride.my` as a Waze server in GET.ride,
-above `https://route.getride.my`.
-
 ## Check and update
 
 - Logs: `~/get.route/GET.route/deploy/mac/logs/` (one file per worker,

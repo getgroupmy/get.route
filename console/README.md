@@ -70,21 +70,23 @@ at 256 MB).
    user (uid 10002):
 
    ```bash
-   mkdir -p /volume1/docker/get-route-console/data && sudo chown 10002 /volume1/docker/get-route-console/data && chmod 700 /volume1/docker/get-route-console/data
+   sudo mkdir -p /volume1/docker/get-route-console/data && sudo chown 10002 /volume1/docker/get-route-console/data && sudo chmod 700 /volume1/docker/get-route-console/data
    ```
 
-2. Copy this repository's `console` folder's files into
-   `/volume1/docker/get-route-console`, and `.env.example` to `.env` there.
-   Fill in, on the NAS:
-   - `WZ_ADMIN_TOKEN`: `openssl rand -hex 32`
-   - `WZ_SECRET_KEY`: `openssl rand -base64 32`
-   - `GET_ROUTE_NETWORK`: GET.route's network name:
+2. Put the compose file in that folder as `compose.yaml`, building straight
+   from GitHub as the NAS pool does (the office NAS does this; no copy of the
+   code is needed): `docker-compose.yml` from this folder, with
+   `build: .` changed to
+   `build: https://github.com/getgroupmy/get.route.git#main:console` and
+   `${WZ_DATA_PATH}` replaced by `/volume1/docker/get-route-console/data`.
+3. Make `.env` there. This makes the admin token and the secret key on the
+   NAS (never typed or shown) and finds GET.route's Docker network:
 
-     ```bash
-     sudo docker inspect get-route-tunnel --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
-     ```
+   ```bash
+   cd /volume1/docker/get-route-console && NET=$(sudo docker inspect get-route-pool --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' | awk '{print $1}') && printf 'WZ_ADMIN_TOKEN=%s\nWZ_SECRET_KEY=%s\nWZ_PUBLIC_URL=https://waze.getcdn.link\nGET_ROUTE_NETWORK=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" "$NET" | sudo tee .env > /dev/null && sudo chmod 600 .env && echo "network: $NET"
+   ```
 
-3. Start it (Container Manager › Project › Create with that folder, or):
+   Start it:
 
    ```bash
    cd /volume1/docker/get-route-console && sudo docker compose up -d --build
@@ -110,18 +112,22 @@ at 256 MB).
 8. **Apps**: create one for GET.ride and copy its key.
 9. In GET.ride, **Admin › Settings › Fare AI provider › Waze servers**: one
    server, `https://waze.getcdn.link`, with that key. **Test**, then **Save
-   changes**. Remove the old `route.getride.my` card (the console now asks
-   the NAS pool itself), or leave it below as a last resort.
+   changes**. That is GET.ride's only Waze server: the console asks the Mac
+   and the NAS pool itself.
 
 ## Check and update
 
 - From anywhere: `https://waze.getcdn.link/health` answers
   `{"status": "ok", "servers": 2, "servers_online": 2}`.
 - On the NAS: `sudo docker logs get-route-console 2>&1 | tail -20`.
-- Update: copy the new files in (keep `.env` and `data/`), then
-  `sudo docker compose up -d --build`. The database is kept.
-- Back up `data/console.db` with the NAS's other backups; without
-  `WZ_SECRET_KEY` the servers' keys in it can't be read.
+- Update to the latest `main` (`.env` and `data/` are kept):
+
+  ```bash
+  cd /volume1/docker/get-route-console && sudo docker compose build --no-cache && sudo docker compose up -d
+  ```
+
+- Back up `data/` together with `.env` with the NAS's other backups;
+  without `WZ_SECRET_KEY` the servers' keys in the database can't be read.
 
 ## Settings (`.env`)
 
