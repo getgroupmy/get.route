@@ -1,7 +1,9 @@
 # GET.route console on the office NAS (see README.md): one small container in
 # front of the Waze servers, reached through GET.route's Cloudflare Tunnel:
 #
-#   waze.getcdn.link -> http://get-route-console:8080
+#   waze2.getcdn.link -> http://get-route-console:8080
+#
+# (waze.getcdn.link is the same console on the Mac mini, deploy/mac.)
 #
 # It joins GET.route's Docker network, so the NAS pool is http://get-route-pool:8000
 # and that tunnel reaches the console by name. The Mac mini is reached on the

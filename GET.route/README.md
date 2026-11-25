@@ -8,16 +8,17 @@ Chrome that earns the reCAPTCHA token Waze asks for.
 In production it runs as Waze servers in the office: a Mac mini first
 (`deploy/mac`) and a pool of 16 containers on the NAS behind it
 (`deploy/nas`). Apps never call them directly: they call the GET.route
-console at `https://waze.getcdn.link` (`../console`) with their own key, and
-the console asks the servers in order. GET.ride's `ai-route-proxy` asks it as the **Waze** step of the fare data
+consoles (`../console`) with their own key, `https://waze.getcdn.link` on
+the Mac and `https://waze2.getcdn.link` on the NAS, and each console asks
+the servers in order. GET.ride's `ai-route-proxy` asks it as the **Waze** step of the fare data
 order (Admin › Settings › Fare AI provider), usually first: **Waze, then
 Google Maps, then Apple Maps, then AI, then OSRM**. The Waze / Google Maps /
 Apple Maps balance can send a share of fares to Google Maps or Apple Maps
 first; Waze takes the rest.
 
 ```
- rider app ──► ai-route-proxy ──https──► waze.getcdn.link ─┬─► Mac mini: pool ─► workers (run.py + Chrome)
- (GET.ride)    (Supabase)      X-Route-Key   (console, NAS)  └─► NAS: get-route-pool ─► get-route-01 … 16
+ rider app ──► ai-route-proxy ──https──► waze.getcdn.link  (console, Mac) ─┬─► Mac mini: pool ─► workers (run.py + Chrome)
+ (GET.ride)    (Supabase)      X-Route-Key   waze2.getcdn.link (console, NAS) ─┴─► NAS: get-route-pool ─► get-route-01 … 16
 ```
 
 Based on [omkarcloud/waze-scraper](https://github.com/omkarcloud/waze-scraper)
@@ -121,7 +122,7 @@ Capacity is about 16 × 23 ≈ 368 Waze calls a minute. The thresholds are
 (the Docker image is Intel-only) with the Mac's own Chrome, and is listed
 above the NAS pool in the console's **Servers**.
 
-**The console (`waze.getcdn.link`):** see [`../console/README.md`](../console/README.md).
+**The consoles (`waze.getcdn.link` on the Mac, `waze2.getcdn.link` on the NAS):** see [`../console/README.md`](../console/README.md) and [`../console/deploy/mac/README.md`](../console/deploy/mac/README.md).
 
 ## Running it on your own computer
 

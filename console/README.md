@@ -1,16 +1,25 @@
-# GET.route console (waze.getcdn.link)
+# GET.route console (waze.getcdn.link, waze2.getcdn.link)
 
 One standalone service in front of the office Waze servers, for GET's own
-apps. Each app (GET.ride, GET.teksi, ...) calls `https://waze.getcdn.link`
-with its own key; the console asks the Waze servers in the order you set (the
-Mac mini first, the NAS pool behind it) and moves on when one doesn't answer.
-The console at `/admin` is where people sign in, as on GET.ekyc.
+apps. Each app (GET.ride, GET.teksi, ...) calls it with its own key; the
+console asks the Waze servers in the order you set and moves on when one
+doesn't answer. The console at `/admin` is where people sign in, as on
+GET.ekyc.
+
+It runs twice, so Waze keeps working when either machine is down:
 
 ```
- GET.ride ─┐                                       ┌─► Mac mini   http://MAC_IP:8100   (deploy/mac)
- GET.teksi ├─ X-Route-Key ─► waze.getcdn.link ──────┤
- ...      ─┘   (one key per app)  (this console)    └─► NAS pool   http://get-route-pool:8000 (deploy/nas)
+                ┌─► waze.getcdn.link  ─► console on the Mac mini (deploy/mac) ─┬─► Mac pool   first
+ GET.ride ──────┤   (Waze server 1)                                            └─► NAS pool   second
+ (one key per   │
+  app on each)  └─► waze2.getcdn.link ─► console on the NAS (this folder)     ─┬─► NAS pool   first
+                    (Waze server 2)                                            └─► Mac pool   second
 ```
+
+GET.ride lists both as Waze servers and moves to `waze2` when `waze` doesn't
+answer. The two consoles share nothing: each has its own apps and keys,
+servers, log, users and audit trail. This README sets up the NAS one; the
+Mac one is in [`deploy/mac/README.md`](deploy/mac/README.md).
 
 **For GET's own apps only.** It serves Waze's live-map data, read through an
 automated Chrome, which Waze's terms very likely forbid. It is not a product
@@ -83,7 +92,7 @@ at 256 MB).
    NAS (never typed or shown) and finds GET.route's Docker network:
 
    ```bash
-   cd /volume1/docker/get-route-console && NET=$(sudo docker inspect get-route-pool --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' | awk '{print $1}') && printf 'WZ_ADMIN_TOKEN=%s\nWZ_SECRET_KEY=%s\nWZ_PUBLIC_URL=https://waze.getcdn.link\nGET_ROUTE_NETWORK=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" "$NET" | sudo tee .env > /dev/null && sudo chmod 600 .env && echo "network: $NET"
+   cd /volume1/docker/get-route-console && NET=$(sudo docker inspect get-route-pool --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' | awk '{print $1}') && printf 'WZ_ADMIN_TOKEN=%s\nWZ_SECRET_KEY=%s\nWZ_PUBLIC_URL=https://waze2.getcdn.link\nGET_ROUTE_NETWORK=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" "$NET" | sudo tee .env > /dev/null && sudo chmod 600 .env && echo "network: $NET"
    ```
 
    Start it:
@@ -93,31 +102,30 @@ at 256 MB).
    ```
 
 4. In Cloudflare Zero Trust › Networks › Tunnels, open **GET.route's tunnel**
-   › Public Hostname › **Add**: `waze.getcdn.link` → **HTTP**
+   › Public Hostname › **Add**: `waze2.getcdn.link` → **HTTP**
    `get-route-console:8080`. `getcdn.link` is not behind GET.ride's subdomain
    worker, so nothing else is needed.
 5. Protect the console: a Cloudflare Access policy (or a WAF rule) on
-   `waze.getcdn.link/admin*`, as for GET.ekyc, so only your team reaches the
+   `waze2.getcdn.link/admin*`, as for GET.ekyc, so only your team reaches the
    sign-in page. The API itself needs an app key for every call.
-6. Open `https://waze.getcdn.link/admin`, sign in with the admin token, and
+6. Open `https://waze2.getcdn.link/admin`, sign in with the admin token, and
    create your user under **Admins**.
 7. **Servers**: add, in this order:
-   - **Mac mini**: `http://MAC_IP:8100` with the Mac's `ROUTE_API_KEY`
-     (`GET.route/deploy/mac`, with `POOL_HOST=0.0.0.0`). Give the Mac a fixed
-     address on the office router (a DHCP reservation).
    - **NAS pool**: `http://get-route-pool:8000` with the NAS's
      `ROUTE_API_KEY`.
+   - **Mac mini**: `http://192.168.0.101:8100` with the Mac's `ROUTE_API_KEY`
+     (`GET.route/deploy/mac`, with `POOL_HOST=0.0.0.0`; the Mac has that
+     fixed address on the office network).
 
    Tap **Test** on each.
 8. **Apps**: create one for GET.ride and copy its key.
-9. In GET.ride, **Admin › Settings › Fare AI provider › Waze servers**: one
-   server, `https://waze.getcdn.link`, with that key. **Test**, then **Save
-   changes**. That is GET.ride's only Waze server: the console asks the Mac
-   and the NAS pool itself.
+9. In GET.ride, **Admin › Settings › Fare AI provider › Waze servers**:
+   `https://waze2.getcdn.link` with that key, below `https://waze.getcdn.link`
+   (the Mac's console). **Test**, then **Save changes**.
 
 ## Check and update
 
-- From anywhere: `https://waze.getcdn.link/health` answers
+- From anywhere: `https://waze2.getcdn.link/health` answers
   `{"status": "ok", "servers": 2, "servers_online": 2}`.
 - On the NAS: `sudo docker logs get-route-console 2>&1 | tail -20`.
 - Update to the latest `main` (`.env` and `data/` are kept):
@@ -135,7 +143,7 @@ at 256 MB).
 |---|---|---|
 | `WZ_ADMIN_TOKEN` | required | The owner's way in (24+ characters). Changing it signs everyone out. |
 | `WZ_SECRET_KEY` | required | 32 random bytes, base64: encrypts the servers' keys and signs sign-ins. |
-| `WZ_PUBLIC_URL` | none | The address apps use, shown in the console. |
+| `WZ_PUBLIC_URL` | none | The address apps use, shown in the console (`https://waze2.getcdn.link` on the NAS). |
 | `WZ_TOTAL_TIMEOUT_MS` | `8000` | Starting value; change it in **Settings**. |
 | `WZ_DEFAULT_RATE_PER_MINUTE` | `300` | Starting value; change it in **Settings**. |
 | `WZ_LOG_RETENTION_DAYS` | `30` | Starting value; change it in **Settings**. |
@@ -178,3 +186,4 @@ the server test and the health check.
 | `app/auth.py`, `app/permissions.py` | Keys, passwords, sessions, roles |
 | `app/db.py`, `app/crypto.py`, `app/config.py` | Database, encryption, settings |
 | `app/static/admin.html` | The console |
+| `deploy/mac/` | The same console on the Mac mini: start script, launchd file, set-up |
