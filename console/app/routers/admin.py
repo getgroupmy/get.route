@@ -241,11 +241,11 @@ def move_backend(bid: str, up: bool = True, ctx: Ctx = Depends(need("backends.ma
     if i is None:
         _404("server")
     j = i - 1 if up else i + 1
-    if 0 <= j < len(order):
+    if 0 <= j < len(order):  # already first (or last): nothing moves, nothing is logged
         order[i], order[j] = order[j], order[i]
-    for n, b in enumerate(order):
-        b.position = n + 1
-    audit(db, ctx.actor, "server.move", bid, "earlier" if up else "later")
+        for n, b in enumerate(order):
+            b.position = n + 1
+        audit(db, ctx.actor, "server.move", bid, "earlier" if up else "later")
     return [_backend_out(b) for b in order]
 
 
